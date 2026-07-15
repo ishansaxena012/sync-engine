@@ -1,0 +1,1 @@
+Production-grade real-time synchronization engine built with Java, Spring Boot, WebSockets, Redis, and PostgreSQL. Demonstrates room-based collaboration, presence, shared state synchronization, event ordering, recovery, and horizontal scalability.
