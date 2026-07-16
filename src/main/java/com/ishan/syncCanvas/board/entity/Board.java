@@ -4,19 +4,17 @@ import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.*;
+import lombok.experimental.SuperBuilder;
+import com.ishan.syncCanvas.common.entity.BaseEntity;
 
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Builder
+@SuperBuilder
 @Entity
 @Table(name = "boards")
-public class Board {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    private UUID id;
+public class Board extends BaseEntity {
 
     @Column(nullable = false)
     private String name;
@@ -27,23 +25,5 @@ public class Board {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Visibility visibility;
-
-    @Column(nullable = false, updatable = false)
-    private Instant createdAt;
-
-    @Column(nullable = false)
-    private Instant updatedAt;
-
-    @PrePersist
-    public void onCreate() {
-        createdAt = Instant.now();
-        updatedAt = Instant.now();
-    }
-
-    @PreUpdate
-    public void onUpdate() {
-        updatedAt = Instant.now();
-    }
-
 
 }

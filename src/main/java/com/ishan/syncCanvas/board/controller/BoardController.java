@@ -9,6 +9,7 @@ import com.ishan.syncCanvas.common.response.ResponseUtil;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import org.springframework.data.domain.Page;
@@ -41,18 +42,20 @@ public class BoardController {
 
                         Pageable pageable) {
 
-                return ResponseUtil.ok(
+                return ResponseUtil.success(
                                 boardService.getBoards(name, pageable),
-                                "Boards fetched successfully");
+                                "Boards fetched successfully",
+                                HttpStatus.OK);
         }
 
         @GetMapping("/{id}")
         public ResponseEntity<ApiResponse<BoardResponse>> getBoard(
                         @PathVariable UUID id) {
                 BoardResponse response = boardService.getBoardById(id);
-                return ResponseUtil.ok(
+                return ResponseUtil.success(
+                                response,
                                 "Boards fetched successfully",
-                                response);
+                                HttpStatus.OK);
         }
 
         @DeleteMapping("{id}")
@@ -67,8 +70,9 @@ public class BoardController {
                         @PathVariable UUID id,
                         @Valid @RequestBody UpdateBoardRequest request) {
 
-                return ResponseUtil.ok(
+                return ResponseUtil.success(
                                 boardService.updateBoard(id, request),
-                                "Board updated successfully");
+                                "Board updated successfully",
+                                HttpStatus.OK);
         }
 }
