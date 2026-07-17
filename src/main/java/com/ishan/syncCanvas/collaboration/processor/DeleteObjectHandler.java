@@ -33,14 +33,16 @@ public class DeleteObjectHandler
 
         try {
 
-            // TODO:
-            // Locate the object
-            // Remove it from the session
-            // Increment version
-            // Publish BoardEvent
+            boolean removed = session.removeObject(operation.objectId());
+
+            if (!removed) {
+                throw new IllegalArgumentException(
+                        "Canvas object not found: " + operation.objectId());
+            }
 
             log.debug(
-                    "DELETE_OBJECT executed for board {}",
+                    "Deleted object {} from board {}",
+                    operation.objectId(),
                     operation.boardId());
 
         } finally {

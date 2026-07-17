@@ -1,6 +1,8 @@
 package com.ishan.syncCanvas.collaboration.processor;
 
+import com.ishan.syncCanvas.canvas.entity.CanvasObject;
 import com.ishan.syncCanvas.collaboration.operation.RotateObjectOperation;
+import com.ishan.syncCanvas.collaboration.session.BoardSession;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,13 +24,36 @@ public class RotateObjectHandler
     @Override
     public void handle(RotateObjectOperation operation) {
 
-        // TODO:
-        // Retrieve BoardSession
-        // Acquire write lock
-        // Rotate object
-        // Increment session version
-        // Publish event
+        BoardSession session = sessionManager
+                .getSession(operation.boardId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "No active session found for board: "
+                                + operation.boardId()));
 
-        log.debug("Processing ROTATE_OBJECT for board {}", operation.boardId());
+        session.getLock().writeLock().lock();
+
+        try {
+
+            CanvasObject object = session.getObject(operation.objectId());
+
+            if (object == null) {
+                throw new IllegalArgumentException(
+                        "Canvas object not found: " + operation.objectId());
+            }
+
+            object.setRotation(operation.rotation());
+
+            session.incrementVersion();
+            session.touch();
+
+            log.debug(
+                    "Rotated object {} to {}° on board {}",
+                    operation.objectId(),
+                    operation.rotation(),
+                    operation.boardId());
+
+        } finally {
+            session.getLock().writeLock().unlock();
+        }
     }
 }

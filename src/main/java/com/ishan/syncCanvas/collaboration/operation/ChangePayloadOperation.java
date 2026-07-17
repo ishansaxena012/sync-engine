@@ -6,18 +6,11 @@ import java.util.UUID;
 import com.ishan.syncCanvas.canvas.domain.CanvasPayload;
 
 public record ChangePayloadOperation(
-
         UUID boardId,
-
         UUID userId,
-
+        Instant timestamp,
         UUID objectId,
-
-        CanvasPayload payload,
-
-        Instant timestamp
-
-) implements Operation {
+        CanvasPayload payload) implements Operation {
 
     @Override
     public OperationType type() {

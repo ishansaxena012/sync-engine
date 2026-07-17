@@ -4,21 +4,15 @@ import java.time.Instant;
 import java.util.UUID;
 
 public record RotateObjectOperation(
-
         UUID boardId,
-
         UUID userId,
-
+        Instant timestamp,
         UUID objectId,
-
-        double rotation,
-
-        Instant timestamp
-
-) implements Operation {
+        double rotation) implements Operation {
 
     @Override
     public OperationType type() {
         return OperationType.ROTATE_OBJECT;
     }
+
 }

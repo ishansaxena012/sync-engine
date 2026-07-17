@@ -75,9 +75,15 @@ public class BoardSession {
         return objects.get(objectId);
     }
 
-    public void removeObject(UUID objectId) {
-        objects.remove(objectId);
-        incrementVersion();
-        touch();
+    public boolean removeObject(UUID objectId) {
+        CanvasObject removed = objects.remove(objectId);
+
+        if (removed != null) {
+            incrementVersion();
+            touch();
+            return true;
+        }
+
+        return false;
     }
 }

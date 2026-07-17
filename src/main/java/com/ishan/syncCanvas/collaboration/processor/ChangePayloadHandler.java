@@ -1,14 +1,11 @@
 package com.ishan.syncCanvas.collaboration.processor;
 
-import org.springframework.stereotype.Component;
-
 import com.ishan.syncCanvas.collaboration.operation.ChangePayloadOperation;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
-
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import java.util.Optional;
+import org.springframework.stereotype.Component;
 
 @Slf4j
 @Component
@@ -28,16 +25,30 @@ public class ChangePayloadHandler
 
         BoardSession session = sessionManager
                 .getSession(operation.boardId())
-                .orElseThrow();
+                .orElseThrow(() -> new IllegalStateException(
+                        "No active session found for board: "
+                                + operation.boardId()));
 
         session.getLock().writeLock().lock();
 
         try {
 
-            // TODO:
-            // update payload
+            com.ishan.syncCanvas.canvas.entity.CanvasObject object = session.getObject(operation.objectId());
 
-            log.debug("CHANGE_PAYLOAD executed");
+            if (object == null) {
+                throw new IllegalArgumentException(
+                        "Canvas object not found: " + operation.objectId());
+            }
+
+            object.changePayload(operation.payload());
+
+            session.incrementVersion();
+            session.touch();
+
+            log.debug(
+                    "Updated payload of object {} on board {}",
+                    operation.objectId(),
+                    operation.boardId());
 
         } finally {
             session.getLock().writeLock().unlock();

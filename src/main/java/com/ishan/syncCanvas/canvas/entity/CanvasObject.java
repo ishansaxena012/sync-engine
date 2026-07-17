@@ -51,4 +51,8 @@ public class CanvasObject extends BaseEntity {
 
     @Version
     private Long version;
+
+    public void changePayload(CanvasPayload payload) {
+        this.payload = payload;
+    }
 }

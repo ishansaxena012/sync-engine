@@ -4,20 +4,12 @@ import java.time.Instant;
 import java.util.UUID;
 
 public record MoveObjectOperation(
-
         UUID boardId,
-
         UUID userId,
-
+        Instant timestamp,
         UUID objectId,
-
         double x,
-
-        double y,
-
-        Instant timestamp
-
-) implements Operation {
+        double y) implements Operation {
 
     @Override
     public OperationType type() {
