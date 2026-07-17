@@ -7,6 +7,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.Supplier;
 import java.util.Optional;
+import java.util.Collection;
+import java.util.Collections;
 
 @Component
 public class BoardSessionManager {
@@ -37,4 +39,9 @@ public class BoardSessionManager {
     public int activeSessions() {
         return sessions.size();
     }
+
+    public Collection<BoardSession> getSessions() {
+        return Collections.unmodifiableCollection(sessions.values());
+    }
+
 }

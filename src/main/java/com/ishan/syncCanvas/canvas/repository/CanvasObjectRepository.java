@@ -9,6 +9,8 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface CanvasObjectRepository extends JpaRepository<CanvasObject, UUID> {
 
+    List<CanvasObject> findByBoardId(UUID boardId);
+
     List<CanvasObject> findByBoardIdOrderByZindexAsc(UUID boardId);
 
     void deleteByBoardId(UUID boardId);

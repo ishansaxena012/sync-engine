@@ -4,8 +4,7 @@ import com.ishan.syncCanvas.canvas.entity.CanvasObject;
 import lombok.Getter;
 
 import java.time.Instant;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.ReadWriteLock;
@@ -65,6 +64,10 @@ public class BoardSession {
         version++;
     }
 
+    public void initialize(Collection<CanvasObject> canvasObjects) {
+        canvasObjects.forEach(object -> objects.put(object.getId(), object));
+    }
+
     public void addObject(CanvasObject object) {
         objects.put(object.getId(), object);
         incrementVersion();
@@ -83,7 +86,15 @@ public class BoardSession {
             touch();
             return true;
         }
-
         return false;
     }
+
+    public void connectUser(UUID userId) {
+        connectedUsers.add(userId);
+    }
+
+    public void disconnectUser(UUID userId) {
+        connectedUsers.remove(userId);
+    }
+
 }
