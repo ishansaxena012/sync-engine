@@ -1,14 +1,16 @@
 package com.ishan.syncCanvas.collaboration.service;
 
+import java.time.Instant;
 import java.util.UUID;
-
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
+import com.ishan.syncCanvas.collaboration.dto.OperationErrorResponse;
+import com.ishan.syncCanvas.collaboration.exception.BoardMismatchException;
+import com.ishan.syncCanvas.collaboration.exception.CollaborationException;
 import com.ishan.syncCanvas.collaboration.operation.Operation;
 import com.ishan.syncCanvas.collaboration.processor.OperationProcessor;
+import com.ishan.syncCanvas.collaboration.publisher.OperationPublisher;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionService;
-
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -16,40 +18,60 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 @RequiredArgsConstructor
 public class CollaborationServiceImpl
-        implements CollaborationService {
+                implements CollaborationService {
 
-    private final BoardSessionService boardSessionService;
-    private final OperationProcessor operationProcessor;
-    private final SimpMessagingTemplate messagingTemplate;
+        private final BoardSessionService boardSessionService;
+        private final OperationProcessor operationProcessor;
+        private final OperationPublisher operationPublisher;
+        // private final CollaborationService collaborationService;
 
-    @Override
-    public void processOperation(
-            UUID boardId,
-            Operation operation) {
+        private void validateBoard(
+                        UUID boardId,
+                        Operation operation) {
 
-        validateBoard(boardId, operation);
-
-        log.debug(
-                "Processing {} on board {}",
-                operation.type(),
-                boardId);
-
-        boardSessionService.openSession(boardId);
-
-        operationProcessor.process(operation);
-
-        messagingTemplate.convertAndSend(
-                "/topic/boards/" + boardId,
-                operation);
-    }
-
-    private void validateBoard(
-            UUID boardId,
-            Operation operation) {
-
-        if (!boardId.equals(operation.boardId())) {
-            throw new IllegalArgumentException(
-                    "Board ID mismatch between destination and operation payload.");
+                if (!boardId.equals(operation.boardId())) {
+                        throw new BoardMismatchException();
+                }
         }
-    }
+
+        @Override
+        public void processOperation(UUID boardId, Operation operation) {
+
+                validateBoard(boardId, operation);
+
+                try {
+                        log.debug("Processing {} on board {}", operation.type(), boardId);
+                        boardSessionService.openSession(boardId);
+                        operationProcessor.process(operation);
+                        operationPublisher.publish(boardId, operation);
+
+                } catch (CollaborationException ex) {
+
+                        log.warn(
+                                        "Operation {} failed on board {} : {}",
+                                        operation.type(),
+                                        boardId,
+                                        ex.getMessage());
+
+                        operationPublisher.publishError(
+
+                                        new OperationErrorResponse(
+
+                                                        "ERROR",
+
+                                                        ex.getMessage(),
+
+                                                        Instant.now()
+
+                                        )
+
+                        );
+
+                        // Temporary.
+                        // Later we'll publish an ERROR event back to the sender.
+
+                }
+
+        }
+
 }

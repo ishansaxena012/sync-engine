@@ -1,6 +1,7 @@
 package com.ishan.syncCanvas.collaboration.processor;
 
 import com.ishan.syncCanvas.canvas.entity.CanvasObject;
+import com.ishan.syncCanvas.collaboration.exception.ObjectNotFoundException;
 // import com.ishan.syncCanvas.canvas.model.CanvasObject;
 import com.ishan.syncCanvas.collaboration.operation.MoveObjectOperation;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
@@ -38,8 +39,7 @@ public class MoveObjectHandler
             CanvasObject object = session.getObject(operation.objectId());
 
             if (object == null) {
-                throw new IllegalArgumentException(
-                        "Canvas object not found: " + operation.objectId());
+                throw new ObjectNotFoundException(operation.objectId());
             }
 
             object.setX(operation.x());

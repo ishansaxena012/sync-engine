@@ -8,26 +8,26 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
 @JsonSubTypes({
-        @JsonSubTypes.Type(value = CreateObjectOperation.class, name = "CREATE_OBJECT"),
-        @JsonSubTypes.Type(value = MoveObjectOperation.class, name = "MOVE_OBJECT"),
-        @JsonSubTypes.Type(value = DeleteObjectOperation.class, name = "DELETE_OBJECT"),
-        @JsonSubTypes.Type(value = ChangePayloadOperation.class, name = "CHANGE_PAYLOAD"),
-        @JsonSubTypes.Type(value = RotateObjectOperation.class, name = "ROTATE_OBJECT")
+                @JsonSubTypes.Type(value = CreateObjectOperation.class, name = "CREATE_OBJECT"),
+                @JsonSubTypes.Type(value = MoveObjectOperation.class, name = "MOVE_OBJECT"),
+                @JsonSubTypes.Type(value = RotateObjectOperation.class, name = "ROTATE_OBJECT"),
+                @JsonSubTypes.Type(value = DeleteObjectOperation.class, name = "DELETE_OBJECT"),
+                @JsonSubTypes.Type(value = ChangePayloadOperation.class, name = "CHANGE_PAYLOAD")
 })
 public sealed interface Operation
-        permits
-        CreateObjectOperation,
-        MoveObjectOperation,
-        DeleteObjectOperation,
-        ChangePayloadOperation,
-        RotateObjectOperation {
+                permits
+                CreateObjectOperation,
+                MoveObjectOperation,
+                DeleteObjectOperation,
+                ChangePayloadOperation,
+                RotateObjectOperation {
 
-    UUID boardId();
+        UUID boardId();
 
-    UUID userId();
+        UUID userId();
 
-    Instant timestamp();
+        Instant timestamp();
 
-    OperationType type();
+        OperationType type();
 
 }
