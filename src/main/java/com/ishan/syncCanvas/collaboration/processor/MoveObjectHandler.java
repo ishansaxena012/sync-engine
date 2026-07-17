@@ -26,6 +26,7 @@ public class MoveObjectHandler
     @Override
     public void handle(MoveObjectOperation operation) {
 
+        log.info("Move handler started");
         BoardSession session = sessionManager
                 .getSession(operation.boardId())
                 .orElseThrow(() -> new IllegalStateException(
@@ -33,9 +34,15 @@ public class MoveObjectHandler
                                 + operation.boardId()));
 
         session.getLock().writeLock().lock();
-
+        log.info("Move handler lock acquired");
         try {
 
+            log.info("Move handler inside try block");
+            
+            if (operation.objectId() == null) {
+                throw new IllegalArgumentException("Object ID cannot be null");
+            }
+            
             CanvasObject object = session.getObject(operation.objectId());
 
             if (object == null) {
@@ -47,6 +54,10 @@ public class MoveObjectHandler
 
             session.incrementVersion();
             session.touch();
+            log.info(
+                    "Object moved to ({}, {})",
+                    operation.x(),
+                    operation.y());
 
             log.debug(
                     "Moved object {} to ({}, {}) on board {}",
@@ -58,5 +69,10 @@ public class MoveObjectHandler
         } finally {
             session.getLock().writeLock().unlock();
         }
+        log.info(
+                "Moved object {} -> ({}, {})",
+                operation.objectId(),
+                operation.x(),
+                operation.y());
     }
 }

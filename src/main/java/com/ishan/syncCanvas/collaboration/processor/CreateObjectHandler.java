@@ -33,6 +33,13 @@ public class CreateObjectHandler
 
         try {
 
+            if (operation.canvasObject() == null) {
+                throw new IllegalArgumentException("Canvas object cannot be null");
+            }
+            if (operation.canvasObject().getId() == null) {
+                throw new IllegalArgumentException("Object ID cannot be null");
+            }
+
             session.addObject(operation.canvasObject());
 
             log.debug(

@@ -42,7 +42,9 @@ public class CollaborationServiceImpl
                 try {
                         log.debug("Processing {} on board {}", operation.type(), boardId);
                         boardSessionService.openSession(boardId);
+                        log.info("Calling processor...");
                         operationProcessor.process(operation);
+                        log.info("Processor finished.");
                         operationPublisher.publish(boardId, operation);
 
                 } catch (CollaborationException ex) {

@@ -1,6 +1,6 @@
 package com.ishan.syncCanvas.collaboration.processor;
 
-import com.ishan.syncCanvas.canvas.entity.CanvasObject;
+import com.ishan.syncCanvas.collaboration.exception.ObjectNotFoundException;
 import com.ishan.syncCanvas.collaboration.operation.RotateObjectOperation;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
@@ -24,6 +24,8 @@ public class RotateObjectHandler
     @Override
     public void handle(RotateObjectOperation operation) {
 
+        log.info("Rotate handler started");
+
         BoardSession session = sessionManager
                 .getSession(operation.boardId())
                 .orElseThrow(() -> new IllegalStateException(
@@ -34,11 +36,14 @@ public class RotateObjectHandler
 
         try {
 
-            CanvasObject object = session.getObject(operation.objectId());
+            if (operation.objectId() == null) {
+                throw new IllegalArgumentException("Object ID cannot be null");
+            }
+
+            com.ishan.syncCanvas.canvas.entity.CanvasObject object = session.getObject(operation.objectId());
 
             if (object == null) {
-                throw new IllegalArgumentException(
-                        "Canvas object not found: " + operation.objectId());
+                throw new ObjectNotFoundException(operation.objectId());
             }
 
             object.setRotation(operation.rotation());
@@ -46,11 +51,10 @@ public class RotateObjectHandler
             session.incrementVersion();
             session.touch();
 
-            log.debug(
-                    "Rotated object {} to {}° on board {}",
+            log.info(
+                    "Rotated object {} to {}°",
                     operation.objectId(),
-                    operation.rotation(),
-                    operation.boardId());
+                    operation.rotation());
 
         } finally {
             session.getLock().writeLock().unlock();

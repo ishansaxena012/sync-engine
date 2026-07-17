@@ -1,5 +1,6 @@
 package com.ishan.syncCanvas.collaboration.processor;
 
+import com.ishan.syncCanvas.collaboration.exception.ObjectNotFoundException;
 import com.ishan.syncCanvas.collaboration.operation.DeleteObjectOperation;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
@@ -33,11 +34,14 @@ public class DeleteObjectHandler
 
         try {
 
+            if (operation.objectId() == null) {
+                throw new IllegalArgumentException("Object ID cannot be null");
+            }
+
             boolean removed = session.removeObject(operation.objectId());
 
             if (!removed) {
-                throw new IllegalArgumentException(
-                        "Canvas object not found: " + operation.objectId());
+                throw new ObjectNotFoundException(operation.objectId());
             }
 
             log.debug(
