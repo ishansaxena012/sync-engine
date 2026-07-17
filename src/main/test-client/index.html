@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>SyncCanvas Test Client</title>
+
+    <!-- <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script> -->
+    <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7/bundles/stomp.umd.min.js"></script>
+    <!-- <script src="app.js"></script> -->
+
+    <style>
+        body {
+            font-family: Arial;
+            margin: 40px;
+        }
+
+        button {
+            margin: 5px;
+        }
+
+        #messages {
+            margin-top: 20px;
+            border: 1px solid #ccc;
+            height: 300px;
+            overflow: auto;
+            padding: 10px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h2>SyncCanvas WebSocket Test Client</h2>
+
+    <button onclick="connect()">Connect</button>
+    <button onclick="subscribe()">Subscribe</button>
+    <button onclick="sendTest()">Send Test Message</button>
+
+    <div id="messages"></div>
+
+    <script src="app.js"></script>
+
+</body>
+
+</html>

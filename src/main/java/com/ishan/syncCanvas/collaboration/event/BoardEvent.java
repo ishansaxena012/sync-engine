@@ -1,5 +1,9 @@
 package com.ishan.syncCanvas.collaboration.event;
 
-public class BoardEvent {
+import com.ishan.syncCanvas.collaboration.operation.Operation;
+
+public record BoardEvent(
+        String type,
+        Operation operation) {
 
 }
