@@ -6,7 +6,7 @@ import com.ishan.syncCanvas.board.dto.UpdateBoardRequest;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable; // Add this import
 
-import java.util.List;
+// import java.util.List;
 import java.util.UUID;
 
 public interface BoardService {

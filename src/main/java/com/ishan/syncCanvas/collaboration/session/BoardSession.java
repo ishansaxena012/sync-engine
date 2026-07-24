@@ -68,6 +68,22 @@ public class BoardSession {
         canvasObjects.forEach(object -> objects.put(object.getId(), object));
     }
 
+    /**
+     * Syncs the JPA-managed version and timestamps from saved deep-copies back into
+     * the live in-memory objects. This must be called instead of replacing the live
+     * objects outright, to avoid stale-version conflicts on subsequent persist cycles.
+     */
+    public void syncVersions(Map<UUID, CanvasObject> savedById) {
+        savedById.forEach((id, saved) -> {
+            CanvasObject live = objects.get(id);
+            if (live != null) {
+                live.setVersion(saved.getVersion());
+                live.setCreatedAt(saved.getCreatedAt());
+                live.setUpdatedAt(saved.getUpdatedAt());
+            }
+        });
+    }
+
     public void addObject(CanvasObject object) {
         objects.put(object.getId(), object);
         incrementVersion();
@@ -97,4 +113,7 @@ public class BoardSession {
         connectedUsers.remove(userId);
     }
 
+    public Collection<CanvasObject> getObjects() {
+        return Collections.unmodifiableCollection(objects.values());
+    }
 }

@@ -1,10 +1,16 @@
 package com.ishan.syncCanvas.collaboration.processor;
 
+import com.ishan.syncCanvas.canvas.dto.CreateCanvasObjectRequest;
+import com.ishan.syncCanvas.canvas.entity.CanvasObject;
 import com.ishan.syncCanvas.collaboration.operation.CreateObjectOperation;
+import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import java.util.UUID;
+
 import org.springframework.stereotype.Component;
 
 @Slf4j
@@ -14,6 +20,7 @@ public class CreateObjectHandler
         implements OperationHandler<CreateObjectOperation> {
 
     private final BoardSessionManager sessionManager;
+    private final DirtySessionTracker dirtySessionTracker;
 
     @Override
     public Class<CreateObjectOperation> supports() {
@@ -32,25 +39,36 @@ public class CreateObjectHandler
         session.getLock().writeLock().lock();
 
         try {
-
-            if (operation.canvasObject() == null) {
-                throw new IllegalArgumentException("Canvas object cannot be null");
+            CreateCanvasObjectRequest request = operation.canvasObject();
+            if (request == null) {
+                throw new IllegalArgumentException("Create object request cannot be null");
             }
-            if (operation.canvasObject().getId() == null) {
-                throw new IllegalArgumentException("Object ID cannot be null");
-            }
+            UUID objectId = request.getId() != null ? request.getId() : UUID.randomUUID();
+            request.setId(objectId);
 
-            session.addObject(operation.canvasObject());
+            CanvasObject object = CanvasObject.builder()
+                    .id(objectId)
+                    .boardId(request.getBoardId())
+                    .type(request.getType())
+                    .x(request.getX())
+                    .y(request.getY())
+                    .rotation(request.getRotation())
+                    .zindex(request.getZindex())
+                    .payload(request.getPayload())
+                    .createdBy(operation.userId())
+                    .build();
+
+            session.addObject(object);
+
+            dirtySessionTracker.markDirty(operation.boardId());
 
             log.debug(
                     "Canvas object {} created on board {}",
-                    operation.canvasObject().getId(),
+                    object.getId(),
                     operation.boardId());
 
         } finally {
-
             session.getLock().writeLock().unlock();
-
         }
     }
 }

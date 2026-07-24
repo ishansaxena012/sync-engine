@@ -1,17 +1,20 @@
 package com.ishan.syncCanvas.collaboration.operation;
 
-import com.ishan.syncCanvas.canvas.entity.CanvasObject;
+import com.ishan.syncCanvas.canvas.dto.CreateCanvasObjectRequest;
+// import com.ishan.syncCanvas.canvas.entity.CanvasObject;
 
 import java.time.Instant;
 import java.util.UUID;
 
 public record CreateObjectOperation(
 
+        UUID operationId,
+
         UUID boardId,
 
         UUID userId,
 
-        CanvasObject canvasObject,
+        CreateCanvasObjectRequest canvasObject,
 
         Instant timestamp
 

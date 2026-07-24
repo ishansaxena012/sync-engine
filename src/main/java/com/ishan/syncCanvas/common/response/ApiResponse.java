@@ -1,8 +1,6 @@
 package com.ishan.syncCanvas.common.response;
 
-import lombok.Builder;
-import lombok.Getter;
-import lombok.Setter;
+import lombok.*;
 
 import java.time.Instant;
 
@@ -13,5 +11,5 @@ public class ApiResponse<T> {
     private String message;
     private T data;
     @Builder.Default
-    private Instant timestamp=Instant.now();
+    private Instant timestamp = Instant.now();
 }

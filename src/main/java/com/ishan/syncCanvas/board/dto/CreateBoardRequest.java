@@ -1,7 +1,6 @@
 package com.ishan.syncCanvas.board.dto;
 
-
-import jakarta.validation.GroupSequence;
+// import jakarta.validation.GroupSequence;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import lombok.Getter;

@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 public record RotateObjectOperation(
+        UUID operationId,
         UUID boardId,
         UUID userId,
         Instant timestamp,

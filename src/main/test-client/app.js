@@ -51,6 +51,11 @@ function sendTest() {
         return;
     }
 
+    if (!lastCreatedObjectId) {
+        log("❌ No object available.");
+        return;
+    }
+
     const operation = {
         type: "MOVE_OBJECT",
         boardId: boardId,
@@ -73,25 +78,78 @@ function sendTest() {
     log("📦 MOVE_OBJECT operation sent");
 }
 
+// function sendCreate() {
+
+//     console.log("sendCreate called");
+
+//     console.log("Client:", stompClient);
+//     console.log("Connected:", stompClient?.connected);
+
+//     const operation = {
+//         type: "CREATE_OBJECT",
+//         boardId: boardId,
+//         userId: USER_ID,
+//         timestamp: new Date().toISOString(),
+
+//         data: {
+//             boardId: boardId,
+//             type: "RECTANGLE",
+//             x: 200,
+//             y: 150,
+//             rotation: 0,
+//             zindex: 1,
+//             payload: {
+//                 type: "RECTANGLE",
+//                 width: 120,
+//                 height: 80,
+//                 cornerRadius: 8,
+//                 fillColor: "#F4B400",
+//                 strokeColor: "#000000"
+//             }
+//         }
+//     };
+
+//     console.log(operation);
+
+//     stompClient.publish({
+//         destination: "/app/boards/" + boardId + "/operations",
+//         headers: {
+//             "content-type": "application/json"
+//         },
+//         body: JSON.stringify(operation)
+//     });
+
+//     console.log("Publish executed");
+// }
+// function sendCreate() {
+
+//     alert("sendCreate called");
+
+//     console.log("sendCreate called");
+
+//     console.log(stompClient);
+//     console.log(stompClient.connected);
+
+//     log("Create button clicked");
+// }
+
 function sendCreate() {
 
-    const operation = {
+    console.log("sendCreate called");
 
+    const operation = {
         type: "CREATE_OBJECT",
         boardId: boardId,
         userId: USER_ID,
         timestamp: new Date().toISOString(),
 
         canvasObject: {
-            id: crypto.randomUUID(),
             boardId: boardId,
             type: "RECTANGLE",
             x: 200,
             y: 150,
             rotation: 0,
-            zIndex: 1,
-            version: 1,
-            createdBy: USER_ID,
+            zindex: 1,
             payload: {
                 type: "RECTANGLE",
                 width: 120,
@@ -103,19 +161,29 @@ function sendCreate() {
         }
     };
 
+    console.log("1");
+    console.log(operation);
+
+    console.log("2");
+
+    const body = JSON.stringify(operation);
+
+    console.log("3");
+    console.log(body);
+
     stompClient.publish({
-
         destination: "/app/boards/" + boardId + "/operations",
-
         headers: {
             "content-type": "application/json"
         },
-
-        body: JSON.stringify(operation)
-
+        body: body
     });
 
+    console.log("4");
 }
+
+
+
 
 function sendRotate() {
 
@@ -209,4 +277,30 @@ function sendChangePayload() {
         body: JSON.stringify(operation)
     });
     log("📦 CHANGE_PAYLOAD operation sent");
+}
+
+async function loadMetrics() {
+
+    try {
+
+        const response = await fetch("http://localhost:8080/api/persistence/metrics");
+
+        console.log("Response:", response);
+
+        const metrics = await response.json();
+
+        console.log("Metrics:", metrics);
+
+        log("📊 Persisted Boards : " + metrics.persistedBoards);
+        log("📊 Persisted Objects : " + metrics.persistedObjects);
+        log("📊 Failed Attempts : " + metrics.failedPersistAttempts);
+
+    } catch (err) {
+
+        console.error("ERROR:", err);
+
+        log(err.toString());
+
+    }
+
 }

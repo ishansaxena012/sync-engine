@@ -6,6 +6,7 @@ import java.util.UUID;
 import com.ishan.syncCanvas.canvas.domain.CanvasPayload;
 
 public record ChangePayloadOperation(
+        UUID operationId,
         UUID boardId,
         UUID userId,
         Instant timestamp,

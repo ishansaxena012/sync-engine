@@ -1,7 +1,6 @@
 package com.ishan.syncCanvas.board.entity;
 
 import jakarta.persistence.*;
-import java.time.Instant;
 import java.util.UUID;
 import lombok.*;
 import lombok.experimental.SuperBuilder;

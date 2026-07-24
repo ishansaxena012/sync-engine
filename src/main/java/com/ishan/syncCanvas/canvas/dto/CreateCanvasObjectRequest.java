@@ -16,6 +16,8 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class CreateCanvasObjectRequest {
 
+    private UUID id;
+
     @NotNull(message = "Board ID is required")
     private UUID boardId;
 

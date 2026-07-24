@@ -2,6 +2,7 @@ package com.ishan.syncCanvas.collaboration.processor;
 
 import com.ishan.syncCanvas.collaboration.exception.ObjectNotFoundException;
 import com.ishan.syncCanvas.collaboration.operation.DeleteObjectOperation;
+import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +16,7 @@ public class DeleteObjectHandler
         implements OperationHandler<DeleteObjectOperation> {
 
     private final BoardSessionManager sessionManager;
+    private final DirtySessionTracker dirtySessionTracker;
 
     @Override
     public Class<DeleteObjectOperation> supports() {
@@ -43,6 +45,7 @@ public class DeleteObjectHandler
             if (!removed) {
                 throw new ObjectNotFoundException(operation.objectId());
             }
+            dirtySessionTracker.markDirty(operation.boardId());
 
             log.debug(
                     "Deleted object {} from board {}",

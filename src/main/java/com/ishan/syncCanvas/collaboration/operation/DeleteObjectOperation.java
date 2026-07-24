@@ -5,6 +5,8 @@ import java.util.UUID;
 
 public record DeleteObjectOperation(
 
+        UUID operationId,
+
         UUID boardId,
 
         UUID userId,

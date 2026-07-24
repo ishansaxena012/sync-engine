@@ -55,4 +55,21 @@ public class CanvasObject extends BaseEntity {
     public void changePayload(CanvasPayload payload) {
         this.payload = payload;
     }
+
+    public CanvasObject deepCopy() {
+        CanvasObject copy = new CanvasObject();
+        copy.setId(this.getId());
+        copy.setCreatedAt(this.getCreatedAt());
+        copy.setUpdatedAt(this.getUpdatedAt());
+        copy.setBoardId(this.boardId);
+        copy.setType(this.type);
+        copy.setX(this.x);
+        copy.setY(this.y);
+        copy.setRotation(this.rotation);
+        copy.setZindex(this.zindex);
+        copy.setPayload(this.payload);
+        copy.setCreatedBy(this.createdBy);
+        copy.setVersion(this.version);
+        return copy;
+    }
 }

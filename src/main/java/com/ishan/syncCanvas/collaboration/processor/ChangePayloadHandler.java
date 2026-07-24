@@ -1,7 +1,9 @@
 package com.ishan.syncCanvas.collaboration.processor;
 
+import com.ishan.syncCanvas.canvas.entity.CanvasObject;
 import com.ishan.syncCanvas.collaboration.exception.ObjectNotFoundException;
 import com.ishan.syncCanvas.collaboration.operation.ChangePayloadOperation;
+import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +17,7 @@ public class ChangePayloadHandler
         implements OperationHandler<ChangePayloadOperation> {
 
     private final BoardSessionManager sessionManager;
+    private final DirtySessionTracker dirtySessionTracker;
 
     @Override
     public Class<ChangePayloadOperation> supports() {
@@ -38,22 +41,20 @@ public class ChangePayloadHandler
                 throw new IllegalArgumentException("Object ID cannot be null");
             }
 
-            com.ishan.syncCanvas.canvas.entity.CanvasObject object = session.getObject(operation.objectId());
+            CanvasObject object = session.getObject(operation.objectId());
 
             if (object == null) {
                 throw new ObjectNotFoundException(operation.objectId());
             }
-
             object.changePayload(operation.payload());
 
             session.incrementVersion();
             session.touch();
-
+            dirtySessionTracker.markDirty(operation.boardId());
             log.debug(
                     "Updated payload of object {} on board {}",
                     operation.objectId(),
                     operation.boardId());
-
         } finally {
             session.getLock().writeLock().unlock();
         }

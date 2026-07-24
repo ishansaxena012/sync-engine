@@ -22,21 +22,13 @@ public class CollaborationController {
             Operation operation) {
 
         log.info("Controller received {}", operation.type());
-
-        collaborationService.processOperation(boardId, operation);
+        log.info("Received operation {}", operation);
+        try {
+            collaborationService.processOperation(boardId, operation);
+        } catch (IllegalArgumentException e) {
+            log.warn("Invalid operation received: {}", e.getMessage());
+        } catch (Exception e) {
+            log.error("Error processing operation", e);
+        }
     }
-
-    // ###########################################################
-    // @MessageMapping("/boards/{boardId}/operations")
-    // public void test(
-    // @DestinationVariable UUID boardId,
-    // String message) {
-
-    // System.out.println("Received: " + message);
-
-    // messagingTemplate.convertAndSend(
-    // "/topic/boards/" + boardId,
-    // "Echo: " + message);
-    // }
-    // #################################################
 }
