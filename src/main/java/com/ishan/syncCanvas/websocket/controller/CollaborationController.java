@@ -8,6 +8,10 @@ import lombok.extern.slf4j.Slf4j;
 import java.util.*;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
+import org.springframework.messaging.handler.annotation.MessageExceptionHandler;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import com.ishan.syncCanvas.collaboration.dto.OperationErrorResponse;
+import java.time.Instant;
 import org.springframework.stereotype.Controller;
 
 @Slf4j
@@ -15,6 +19,7 @@ import org.springframework.stereotype.Controller;
 @RequiredArgsConstructor
 public class CollaborationController {
     private final CollaborationService collaborationService;
+    private final SimpMessagingTemplate messagingTemplate;
 
     @MessageMapping("/boards/{boardId}/operations")
     public void processOperation(
@@ -23,12 +28,15 @@ public class CollaborationController {
 
         log.info("Controller received {}", operation.type());
         log.info("Received operation {}", operation);
-        try {
-            collaborationService.processOperation(boardId, operation);
-        } catch (IllegalArgumentException e) {
-            log.warn("Invalid operation received: {}", e.getMessage());
-        } catch (Exception e) {
-            log.error("Error processing operation", e);
-        }
+        collaborationService.processOperation(boardId, operation);
+    }
+
+    @MessageExceptionHandler
+    public void handleException(Exception e, @DestinationVariable UUID boardId) {
+        log.error("Controller error", e);
+        messagingTemplate.convertAndSend(
+            "/topic/boards/" + boardId + "/errors", 
+            new OperationErrorResponse(null, "ERROR", e.getMessage(), Instant.now())
+        );
     }
 }

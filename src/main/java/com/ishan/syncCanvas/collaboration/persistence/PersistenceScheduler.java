@@ -22,13 +22,13 @@ public class PersistenceScheduler {
     @Scheduled(fixedDelay = 5000)
     public void flushDirtyBoards() {
 
-        log.info("Checking dirty boards...");
+        // log.info("Checking dirty boards...");
 
         for (UUID boardId : dirtySessionTracker.getDirtyBoards()) {
             sessionManager.getSession(boardId).ifPresent(session -> {
                 try {
-                    PersistenceResult result = persistenceService.persist(session);
                     dirtySessionTracker.clearDirty(boardId);
+                    PersistenceResult result = persistenceService.persist(session);
                     log.info("Board {} persisted successfully ({} objects)", result.boardId(),
                             result.persistedObjects());
 

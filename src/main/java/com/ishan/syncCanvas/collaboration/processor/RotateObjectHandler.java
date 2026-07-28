@@ -41,6 +41,8 @@ public class RotateObjectHandler
             if (operation.objectId() == null) {
                 throw new IllegalArgumentException("Object ID cannot be null");
             }
+            log.info("Objects in session: {}", session.getObjects());
+            log.info("Looking for: {}", operation.objectId());
 
             com.ishan.syncCanvas.canvas.entity.CanvasObject object = session.getObject(operation.objectId());
 

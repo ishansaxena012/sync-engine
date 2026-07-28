@@ -9,6 +9,6 @@ public interface OperationPublisher {
 
     void publish(UUID boardId, Operation operation);
 
-    void publishError(OperationErrorResponse error);
+    void publishError(UUID boardId, OperationErrorResponse error);
 
 }

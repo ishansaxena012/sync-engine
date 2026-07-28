@@ -40,6 +40,8 @@ public class ChangePayloadHandler
             if (operation.objectId() == null) {
                 throw new IllegalArgumentException("Object ID cannot be null");
             }
+            log.info("Objects in session: {}", session.getObjects());
+            log.info("Looking for: {}", operation.objectId());
 
             CanvasObject object = session.getObject(operation.objectId());
 

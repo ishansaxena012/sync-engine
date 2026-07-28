@@ -56,17 +56,13 @@ public class CollaborationServiceImpl
                                         ex.getMessage());
 
                         operationPublisher.publishError(
-
+                                        boardId,
                                         new OperationErrorResponse(
-
+                                                        operation.operationId(),
                                                         "ERROR",
-
                                                         ex.getMessage(),
-
                                                         Instant.now()
-
                                         )
-
                         );
 
                         // Temporary.

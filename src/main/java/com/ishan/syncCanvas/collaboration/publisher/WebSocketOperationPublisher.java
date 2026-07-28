@@ -26,14 +26,11 @@ public class WebSocketOperationPublisher implements OperationPublisher {
     }
 
     @Override
-    public void publishError(OperationErrorResponse error) {
-        log.info("error: WebSocketOperationPublisher   || ", error);
-        messagingTemplate.convertAndSendToUser(
-                /* username */
-                "test-user",
-                "/queue/errors",
+    public void publishError(UUID boardId, OperationErrorResponse error) {
+        log.info("Publishing error to board {}: {}", boardId, error);
+        messagingTemplate.convertAndSend(
+                "/topic/boards/" + boardId + "/errors",
                 error);
-
     }
 
 }

@@ -13,6 +13,8 @@ public record DeleteObjectOperation(
 
         UUID objectId,
 
+        Long expectedVersion,
+
         Instant timestamp
 
 ) implements Operation {

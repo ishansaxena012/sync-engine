@@ -27,7 +27,7 @@ public class CreateCanvasObjectRequest {
     private double x;
     private double y;
     private double rotation;
-    private int zindex;
+    private Integer zindex;
 
     @NotNull(message = "Payload is required")
     @Valid

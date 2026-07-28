@@ -9,23 +9,6 @@ This client allows developers to verify the complete WebSocket messaging pipelin
 >- Receive broadcast messages.
 >- Debug the collaboration pipeline.
 
----
-src\main\java\com\ishan\syncCanvas\websocket\controller\CollaborationController.java
-
-Test Code: (replace the code to test the WebSocket connection)
-
->    @MessageMapping("/boards/{boardId}/operations")
->    public void test(
->            @DestinationVariable UUID boardId,
->            String message) {
->
->        System.out.println("Received: " + message);
->
->        messagingTemplate.convertAndSend(
->                "/topic/boards/" + boardId,
->                "Echo: " + message);
->    }
----
 
 > **Note**
 >

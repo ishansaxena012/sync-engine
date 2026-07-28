@@ -45,21 +45,23 @@ public class CreateObjectHandler
             }
             UUID objectId = request.getId() != null ? request.getId() : UUID.randomUUID();
             request.setId(objectId);
+            request.setBoardId(operation.boardId()); // Ensure broadcast has the correct boardId
 
             CanvasObject object = CanvasObject.builder()
                     .id(objectId)
-                    .boardId(request.getBoardId())
+                    .boardId(operation.boardId())
                     .type(request.getType())
                     .x(request.getX())
                     .y(request.getY())
                     .rotation(request.getRotation())
-                    .zindex(request.getZindex())
+                    .zindex(request.getZindex() != null ? request.getZindex() : 0)
                     .payload(request.getPayload())
                     .createdBy(operation.userId())
                     .build();
 
             session.addObject(object);
-
+            log.info("Added {}", object.getId());
+            log.info("Session size {}", session.getObjects().size());
             dirtySessionTracker.markDirty(operation.boardId());
 
             log.debug(

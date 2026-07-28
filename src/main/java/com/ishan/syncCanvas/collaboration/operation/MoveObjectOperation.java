@@ -9,6 +9,7 @@ public record MoveObjectOperation(
         UUID userId,
         Instant timestamp,
         UUID objectId,
+        Long expectedVersion,
         double x,
         double y) implements Operation {
 

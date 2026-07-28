@@ -29,9 +29,15 @@ public class BoardPersistenceServiceImpl implements BoardPersistenceService {
                 // in-memory references. This prevents StaleObjectStateException: the live
                 // object keeps its current (pre-save) version, we save a copy, and then
                 // we sync only the version/timestamps back into the live objects.
-                List<CanvasObject> copies = session.getObjects().stream()
-                                .map(CanvasObject::deepCopy)
-                                .collect(Collectors.toList());
+                List<CanvasObject> copies;
+                session.getLock().readLock().lock();
+                try {
+                        copies = session.getObjects().stream()
+                                        .map(CanvasObject::deepCopy)
+                                        .collect(Collectors.toList());
+                } finally {
+                        session.getLock().readLock().unlock();
+                }
 
                 log.info("Persisting {} objects for board {}", copies.size(), session.getBoardId());
 

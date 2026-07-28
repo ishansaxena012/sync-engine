@@ -14,7 +14,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public class OperationProcessor {
 
     private final List<OperationHandler<? extends Operation>> handlers;
-
     private final Map<Class<? extends Operation>, OperationHandler<? extends Operation>> registry = new ConcurrentHashMap<>();
 
     @PostConstruct

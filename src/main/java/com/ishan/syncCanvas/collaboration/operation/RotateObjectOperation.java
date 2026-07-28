@@ -9,6 +9,7 @@ public record RotateObjectOperation(
         UUID userId,
         Instant timestamp,
         UUID objectId,
+        Long expectedVersion,
         double rotation) implements Operation {
 
     @Override

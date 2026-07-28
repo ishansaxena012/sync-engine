@@ -4,17 +4,19 @@ import com.ishan.syncCanvas.board.dto.BoardResponse;
 import com.ishan.syncCanvas.board.dto.CreateBoardRequest;
 import com.ishan.syncCanvas.board.dto.UpdateBoardRequest;
 import com.ishan.syncCanvas.board.service.BoardService;
+import com.ishan.syncCanvas.canvas.dto.CanvasObjectResponse;
+import com.ishan.syncCanvas.canvas.service.CanvasObjectService;
 import com.ishan.syncCanvas.common.response.ApiResponse;
 import com.ishan.syncCanvas.common.response.ResponseUtil;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.ResponseEntity;
-import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.*;
-
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-// import java.util.List;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -23,6 +25,7 @@ import java.util.UUID;
 public class BoardController {
 
         private final BoardService boardService;
+        private final CanvasObjectService canvasObjectService;
 
         @PostMapping
         public ResponseEntity<ApiResponse<BoardResponse>> createBoard(
@@ -37,9 +40,7 @@ public class BoardController {
 
         @GetMapping
         public ResponseEntity<ApiResponse<Page<BoardResponse>>> getBoards(
-
                         @RequestParam(required = false) String name,
-
                         Pageable pageable) {
 
                 return ResponseUtil.success(
@@ -51,18 +52,25 @@ public class BoardController {
         @GetMapping("/{id}")
         public ResponseEntity<ApiResponse<BoardResponse>> getBoard(
                         @PathVariable UUID id) {
+
                 BoardResponse response = boardService.getBoardById(id);
+
                 return ResponseUtil.success(
                                 response,
-                                "Boards fetched successfully",
+                                "Board fetched successfully",
                                 HttpStatus.OK);
         }
 
-        @DeleteMapping("{id}")
-        public ResponseEntity<Void> deleteBoard(
+        @GetMapping("/{id}/objects")
+        public ResponseEntity<ApiResponse<List<CanvasObjectResponse>>> getBoardObjects(
                         @PathVariable UUID id) {
-                boardService.deleteBoard(id);
-                return ResponseEntity.noContent().build();
+
+                List<CanvasObjectResponse> response = canvasObjectService.getObjectsByBoard(id);
+
+                return ResponseUtil.success(
+                                response,
+                                "Canvas objects fetched successfully",
+                                HttpStatus.OK);
         }
 
         @PatchMapping("/{id}")
@@ -74,5 +82,13 @@ public class BoardController {
                                 boardService.updateBoard(id, request),
                                 "Board updated successfully",
                                 HttpStatus.OK);
+        }
+
+        @DeleteMapping("/{id}")
+        public ResponseEntity<Void> deleteBoard(
+                        @PathVariable UUID id) {
+
+                boardService.deleteBoard(id);
+                return ResponseEntity.noContent().build();
         }
 }

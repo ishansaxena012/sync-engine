@@ -11,6 +11,7 @@ public record ChangePayloadOperation(
         UUID userId,
         Instant timestamp,
         UUID objectId,
+        Long expectedVersion,
         CanvasPayload payload) implements Operation {
 
     @Override

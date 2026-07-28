@@ -74,14 +74,19 @@ public class BoardSession {
      * objects outright, to avoid stale-version conflicts on subsequent persist cycles.
      */
     public void syncVersions(Map<UUID, CanvasObject> savedById) {
-        savedById.forEach((id, saved) -> {
-            CanvasObject live = objects.get(id);
-            if (live != null) {
-                live.setVersion(saved.getVersion());
-                live.setCreatedAt(saved.getCreatedAt());
-                live.setUpdatedAt(saved.getUpdatedAt());
-            }
-        });
+        lock.writeLock().lock();
+        try {
+            savedById.forEach((id, saved) -> {
+                CanvasObject live = objects.get(id);
+                if (live != null) {
+                    live.setVersion(saved.getVersion());
+                    live.setCreatedAt(saved.getCreatedAt());
+                    live.setUpdatedAt(saved.getUpdatedAt());
+                }
+            });
+        } finally {
+            lock.writeLock().unlock();
+        }
     }
 
     public void addObject(CanvasObject object) {
