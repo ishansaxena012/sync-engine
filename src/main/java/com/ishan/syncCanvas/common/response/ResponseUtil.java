@@ -21,6 +21,23 @@ public final class ResponseUtil {
                                                                 .build());
         }
 
+        public static <T> ResponseEntity<ApiResponse<T>> success(
+                        T data,
+                        String message) {
+                return success(data, message, HttpStatus.OK);
+        }
+
+        public static <T> ResponseEntity<ApiResponse<T>> unauthorized(
+                        String message) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                                .body(
+                                                ApiResponse.<T>builder()
+                                                                .success(false)
+                                                                .message(message)
+                                                                .build());
+        }
+
+
         public static <T> ResponseEntity<ApiResponse<T>> created(
                         String message,
                         T data) {

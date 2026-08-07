@@ -1,6 +1,5 @@
 package com.ishan.syncCanvas.collaboration.persistence;
 
-import com.ishan.syncCanvas.collaboration.session.BoardSession;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -43,8 +42,5 @@ public class PersistenceScheduler {
         }
     }
 
-    private void persistBoard(BoardSession session) {
-        PersistenceResult result = persistenceService.persist(session);
-        log.info("Board {} persisted ({} objects)", result.boardId(), result.persistedObjects());
-    }
+
 }

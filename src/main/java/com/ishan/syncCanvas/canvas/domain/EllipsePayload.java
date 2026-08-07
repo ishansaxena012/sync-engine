@@ -4,20 +4,18 @@ import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record RectanglePayload(
+public record EllipsePayload(
 
-        double width,
+        double radiusX,
 
-        double height,
+        double radiusY,
 
         @JsonAlias("fillColor")
         String fill,
 
         String stroke,
 
-        double strokeWidth,
-
-        double cornerRadius
+        double strokeWidth
 
 ) implements CanvasPayload {
 }

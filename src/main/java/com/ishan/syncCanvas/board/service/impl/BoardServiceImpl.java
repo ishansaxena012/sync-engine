@@ -9,6 +9,8 @@ import com.ishan.syncCanvas.board.mapper.BoardMapper;
 import com.ishan.syncCanvas.board.repository.BoardRepository;
 import com.ishan.syncCanvas.board.service.BoardService;
 import com.ishan.syncCanvas.common.exception.BoardNotFoundException;
+import com.ishan.syncCanvas.user.service.UserService;
+import com.ishan.syncCanvas.user.dto.UserProfileResponse;
 // import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -26,56 +28,72 @@ public class BoardServiceImpl implements BoardService {
 
     private static final Logger log = LoggerFactory.getLogger(BoardServiceImpl.class);
     private final BoardRepository boardRepository;
+    private final UserService userService;
+
+    private BoardResponse mapToResponse(Board board) {
+        UserProfileResponse owner = userService.getUserProfile(board.getOwnerId());
+        return BoardMapper.toResponse(board, owner);
+    }
 
     @Override
-    public BoardResponse createBoard(CreateBoardRequest request) {
+    public BoardResponse createBoard(UUID ownerId, CreateBoardRequest request) {
         log.info("Creating board with name: {}", request.getName());
         Board board = Board.builder()
                 .name(request.getName())
-                .ownerId(UUID.randomUUID())
+                .ownerId(ownerId)
                 .visibility(Visibility.PRIVATE)
                 .build();
         Board savedBoard = boardRepository.save(board);
         log.info("Board created successfully. id={}", savedBoard.getId());
 
-        return BoardMapper.toResponse(savedBoard);
+        return mapToResponse(savedBoard);
     }
 
     @Override
     public Page<BoardResponse> getBoards(
+            UUID userId,
             String name,
             Pageable pageable) {
 
-        log.debug("Fetching boards. Search={}", name);
+        log.debug("Fetching boards for user={}. Search={}", userId, name);
 
         Page<Board> boards;
 
         if (name == null || name.isBlank()) {
-            boards = boardRepository.findAll(pageable);
+            boards = boardRepository.findAccessibleBoards(userId, pageable);
         } else {
-            boards = boardRepository.findByNameContainingIgnoreCase(
+            boards = boardRepository.findAccessibleBoardsByName(
+                    userId,
                     name,
                     pageable);
         }
 
-        return boards.map(BoardMapper::toResponse);
+        return boards.map(this::mapToResponse);
     }
 
     @Override
-    public BoardResponse getBoardById(UUID id) {
+    public BoardResponse getBoardById(UUID userId, UUID id) {
 
         Board board = boardRepository.findById(id)
                 .orElseThrow(() -> new BoardNotFoundException("Board not found"));
 
-        return BoardMapper.toResponse(board);
+        if (!board.getOwnerId().equals(userId) && board.getVisibility() != Visibility.PUBLIC) {
+            throw new org.springframework.security.access.AccessDeniedException("You do not have permission to access this board");
+        }
+
+        return mapToResponse(board);
     }
 
     @Override
     @Transactional
-    public void deleteBoard(UUID id) {
+    public void deleteBoard(UUID userId, UUID id) {
 
         Board board = boardRepository.findById(id)
                 .orElseThrow(() -> new BoardNotFoundException("Board not found"));
+
+        if (!board.getOwnerId().equals(userId)) {
+            throw new org.springframework.security.access.AccessDeniedException("You do not have permission to delete this board");
+        }
 
         boardRepository.delete(board);
     }
@@ -83,6 +101,7 @@ public class BoardServiceImpl implements BoardService {
     @Override
     @Transactional
     public BoardResponse updateBoard(
+            UUID userId,
             UUID id,
             UpdateBoardRequest request) {
 
@@ -93,6 +112,10 @@ public class BoardServiceImpl implements BoardService {
                     log.warn("Board {} not found", id);
                     return new BoardNotFoundException(id);
                 });
+
+        if (!board.getOwnerId().equals(userId)) {
+            throw new org.springframework.security.access.AccessDeniedException("You do not have permission to update this board");
+        }
 
         if (request.getName() != null) {
             board.setName(request.getName());
@@ -106,6 +129,6 @@ public class BoardServiceImpl implements BoardService {
 
         log.info("Board {} updated successfully", id);
 
-        return BoardMapper.toResponse(updatedBoard);
+        return mapToResponse(updatedBoard);
     }
 }

@@ -46,6 +46,7 @@ public class CreateObjectHandler
             UUID objectId = request.getId() != null ? request.getId() : UUID.randomUUID();
             request.setId(objectId);
             request.setBoardId(operation.boardId()); // Ensure broadcast has the correct boardId
+            request.setCreatedBy(operation.userId());
 
             CanvasObject object = CanvasObject.builder()
                     .id(objectId)
@@ -57,6 +58,7 @@ public class CreateObjectHandler
                     .zindex(request.getZindex() != null ? request.getZindex() : 0)
                     .payload(request.getPayload())
                     .createdBy(operation.userId())
+                    .version(1L)
                     .build();
 
             session.addObject(object);

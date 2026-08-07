@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record RectanglePayload(
+public record TrianglePayload(
 
         double width,
 
@@ -15,9 +15,7 @@ public record RectanglePayload(
 
         String stroke,
 
-        double strokeWidth,
-
-        double cornerRadius
+        double strokeWidth
 
 ) implements CanvasPayload {
 }

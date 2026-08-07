@@ -8,6 +8,8 @@ import com.ishan.syncCanvas.canvas.dto.CanvasObjectResponse;
 import com.ishan.syncCanvas.canvas.service.CanvasObjectService;
 import com.ishan.syncCanvas.common.response.ApiResponse;
 import com.ishan.syncCanvas.common.response.ResponseUtil;
+import com.ishan.syncCanvas.security.user.UserPrincipal;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -29,9 +31,10 @@ public class BoardController {
 
         @PostMapping
         public ResponseEntity<ApiResponse<BoardResponse>> createBoard(
+                        @AuthenticationPrincipal UserPrincipal userPrincipal,
                         @Valid @RequestBody CreateBoardRequest request) {
 
-                BoardResponse response = boardService.createBoard(request);
+                BoardResponse response = boardService.createBoard(userPrincipal.getId(), request);
 
                 return ResponseUtil.created(
                                 "Board created successfully",
@@ -40,20 +43,22 @@ public class BoardController {
 
         @GetMapping
         public ResponseEntity<ApiResponse<Page<BoardResponse>>> getBoards(
-                        @RequestParam(required = false) String name,
+                        @AuthenticationPrincipal UserPrincipal userPrincipal,
+                        @RequestParam(name = "name", required = false) String name,
                         Pageable pageable) {
 
                 return ResponseUtil.success(
-                                boardService.getBoards(name, pageable),
+                                boardService.getBoards(userPrincipal.getId(), name, pageable),
                                 "Boards fetched successfully",
                                 HttpStatus.OK);
         }
 
         @GetMapping("/{id}")
         public ResponseEntity<ApiResponse<BoardResponse>> getBoard(
+                        @AuthenticationPrincipal UserPrincipal userPrincipal,
                         @PathVariable UUID id) {
 
-                BoardResponse response = boardService.getBoardById(id);
+                BoardResponse response = boardService.getBoardById(userPrincipal.getId(), id);
 
                 return ResponseUtil.success(
                                 response,
@@ -63,7 +68,11 @@ public class BoardController {
 
         @GetMapping("/{id}/objects")
         public ResponseEntity<ApiResponse<List<CanvasObjectResponse>>> getBoardObjects(
+                        @AuthenticationPrincipal UserPrincipal userPrincipal,
                         @PathVariable UUID id) {
+                // Ensure the user actually has access to this board before returning its
+                // objects
+                boardService.getBoardById(userPrincipal.getId(), id);
 
                 List<CanvasObjectResponse> response = canvasObjectService.getObjectsByBoard(id);
 
@@ -75,20 +84,22 @@ public class BoardController {
 
         @PatchMapping("/{id}")
         public ResponseEntity<ApiResponse<BoardResponse>> updateBoard(
+                        @AuthenticationPrincipal UserPrincipal userPrincipal,
                         @PathVariable UUID id,
                         @Valid @RequestBody UpdateBoardRequest request) {
 
                 return ResponseUtil.success(
-                                boardService.updateBoard(id, request),
+                                boardService.updateBoard(userPrincipal.getId(), id, request),
                                 "Board updated successfully",
                                 HttpStatus.OK);
         }
 
         @DeleteMapping("/{id}")
-        public ResponseEntity<Void> deleteBoard(
+        public ResponseEntity<ApiResponse<Void>> deleteBoard(
+                        @AuthenticationPrincipal UserPrincipal userPrincipal,
                         @PathVariable UUID id) {
 
-                boardService.deleteBoard(id);
-                return ResponseEntity.noContent().build();
+                boardService.deleteBoard(userPrincipal.getId(), id);
+                return ResponseUtil.success("Board deleted successfully");
         }
 }

@@ -8,6 +8,9 @@ import org.mapstruct.Mapper;
 @Mapper(componentModel = "spring")
 public interface CanvasObjectMapper {
 
+    @org.mapstruct.Mapping(target = "createdAt", ignore = true)
+    @org.mapstruct.Mapping(target = "updatedAt", ignore = true)
+    @org.mapstruct.Mapping(target = "version", ignore = true)
     CanvasObject toEntity(CreateCanvasObjectRequest request);
 
     CanvasObjectResponse toResponse(CanvasObject canvasObject);

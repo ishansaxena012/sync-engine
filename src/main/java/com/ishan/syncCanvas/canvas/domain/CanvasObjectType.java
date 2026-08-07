@@ -8,5 +8,8 @@ public enum CanvasObjectType {
     ARROW,
     TEXT,
     IMAGE,
-    STICKY_NOTE
+    STICKY_NOTE,
+    ELLIPSE,
+    TRIANGLE,
+    DIAMOND
 }

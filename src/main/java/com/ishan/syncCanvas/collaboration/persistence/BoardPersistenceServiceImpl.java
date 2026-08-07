@@ -8,8 +8,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -30,11 +32,13 @@ public class BoardPersistenceServiceImpl implements BoardPersistenceService {
                 // object keeps its current (pre-save) version, we save a copy, and then
                 // we sync only the version/timestamps back into the live objects.
                 List<CanvasObject> copies;
+                Set<UUID> deletedIds;
                 session.getLock().readLock().lock();
                 try {
                         copies = session.getObjects().stream()
                                         .map(CanvasObject::deepCopy)
                                         .collect(Collectors.toList());
+                        deletedIds = new HashSet<>(session.getDeletedObjectIds());
                 } finally {
                         session.getLock().readLock().unlock();
                 }
@@ -43,7 +47,13 @@ public class BoardPersistenceServiceImpl implements BoardPersistenceService {
 
                 List<CanvasObject> saved = canvasObjectRepository.saveAllAndFlush(copies);
 
-                log.info("Saved {} objects for board {}", saved.size(), session.getBoardId());
+                if (!deletedIds.isEmpty()) {
+                        log.info("Deleting {} objects for board {}", deletedIds.size(), session.getBoardId());
+                        canvasObjectRepository.deleteAllById(deletedIds);
+                        session.getDeletedObjectIds().removeAll(deletedIds);
+                }
+
+                log.info("Saved {} objects and deleted {} objects for board {}", saved.size(), deletedIds.size(), session.getBoardId());
 
                 // Build id -> saved copy map and sync version/timestamps back to live objects.
                 Map<UUID, CanvasObject> savedById = saved.stream()

@@ -1,6 +1,7 @@
 package com.ishan.syncCanvas.collaboration.processor;
 
 import com.ishan.syncCanvas.collaboration.exception.ObjectNotFoundException;
+import com.ishan.syncCanvas.collaboration.exception.VersionMismatchException;
 import com.ishan.syncCanvas.collaboration.operation.RotateObjectOperation;
 import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
@@ -50,7 +51,19 @@ public class RotateObjectHandler
                 throw new ObjectNotFoundException(operation.objectId());
             }
 
+            if (operation.expectedVersion() != null && !java.util.Objects.equals(object.getVersion(), operation.expectedVersion())) {
+                throw new VersionMismatchException(
+                        operation.expectedVersion(),
+                        object.getVersion());
+            }
+
             object.setRotation(operation.rotation());
+            
+            if (object.getVersion() != null) {
+                object.setVersion(object.getVersion() + 1);
+            } else {
+                object.setVersion(1L);
+            }
 
             session.incrementVersion();
             session.touch();

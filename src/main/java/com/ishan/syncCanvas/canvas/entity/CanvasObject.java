@@ -49,7 +49,6 @@ public class CanvasObject extends BaseEntity {
     @Column(name = "created_by", updatable = false, nullable = true)
     private UUID createdBy;
 
-    @Version
     private Long version;
 
     public void changePayload(CanvasPayload payload) {

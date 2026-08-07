@@ -21,6 +21,8 @@ public class BoardSession {
 
     private final ReadWriteLock lock;
 
+    private final Set<UUID> deletedObjectIds;
+
     private SessionState state;
 
     private long version;
@@ -34,6 +36,8 @@ public class BoardSession {
         this.objects = new ConcurrentHashMap<>();
 
         this.connectedUsers = ConcurrentHashMap.newKeySet();
+
+        this.deletedObjectIds = ConcurrentHashMap.newKeySet();
 
         this.lock = new ReentrantReadWriteLock();
 
@@ -79,7 +83,6 @@ public class BoardSession {
             savedById.forEach((id, saved) -> {
                 CanvasObject live = objects.get(id);
                 if (live != null) {
-                    live.setVersion(saved.getVersion());
                     live.setCreatedAt(saved.getCreatedAt());
                     live.setUpdatedAt(saved.getUpdatedAt());
                 }
@@ -103,6 +106,7 @@ public class BoardSession {
         CanvasObject removed = objects.remove(objectId);
 
         if (removed != null) {
+            deletedObjectIds.add(objectId);
             incrementVersion();
             touch();
             return true;

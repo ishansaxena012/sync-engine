@@ -50,13 +50,23 @@ public class MoveObjectHandler
                         }
 
                         CanvasObject object = session.getObject(operation.objectId());
-                        if (!Objects.equals(object.getVersion(), operation.expectedVersion())) {
+                        
+                        if (object == null) {
+                                throw new ObjectNotFoundException(operation.objectId());
+                        }
+                        if (operation.expectedVersion() != null && !Objects.equals(object.getVersion(), operation.expectedVersion())) {
                                 throw new VersionMismatchException(
                                                 operation.expectedVersion(),
                                                 object.getVersion());
                         }
                         object.setX(operation.x());
                         object.setY(operation.y());
+                        
+                        if (object.getVersion() != null) {
+                                object.setVersion(object.getVersion() + 1);
+                        } else {
+                                object.setVersion(1L);
+                        }
 
                         session.incrementVersion();
                         session.touch();

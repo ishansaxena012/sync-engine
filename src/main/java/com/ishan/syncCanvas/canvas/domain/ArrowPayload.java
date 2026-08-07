@@ -1,23 +1,19 @@
 package com.ishan.syncCanvas.canvas.domain;
 
-import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record RectanglePayload(
+public record ArrowPayload(
 
-        double width,
-
-        double height,
-
-        @JsonAlias("fillColor")
-        String fill,
+        double[] points,
 
         String stroke,
 
         double strokeWidth,
 
-        double cornerRadius
+        boolean pointerAtStart,
+
+        boolean pointerAtEnd
 
 ) implements CanvasPayload {
 }

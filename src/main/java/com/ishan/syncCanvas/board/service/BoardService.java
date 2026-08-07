@@ -10,15 +10,16 @@ import org.springframework.data.domain.Pageable; // Add this import
 import java.util.UUID;
 
 public interface BoardService {
-    BoardResponse createBoard(CreateBoardRequest request);
+    BoardResponse createBoard(UUID ownerId, CreateBoardRequest request);
 
-    Page<BoardResponse> getBoards(String name, Pageable pageable);
+    Page<BoardResponse> getBoards(UUID userId, String name, Pageable pageable);
 
-    BoardResponse getBoardById(UUID id);
+    BoardResponse getBoardById(UUID userId, UUID id);
 
-    void deleteBoard(UUID id);
+    void deleteBoard(UUID userId, UUID id);
 
     BoardResponse updateBoard(
+            UUID userId,
             UUID id,
             UpdateBoardRequest request);
 }

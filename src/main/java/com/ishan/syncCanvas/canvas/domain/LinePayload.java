@@ -1,12 +1,13 @@
 package com.ishan.syncCanvas.canvas.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record LinePayload(
 
-        double x2,
+        double[] points,
 
-        double y2,
-
-        String strokeColor,
+        String stroke,
 
         double strokeWidth
 
