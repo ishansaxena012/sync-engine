@@ -16,10 +16,10 @@ public interface BoardRepository extends JpaRepository<Board, UUID> {
 
     Page<Board> findByNameContainingIgnoreCase(String name, Pageable pageable);
 
-    @org.springframework.data.jpa.repository.Query("SELECT b FROM Board b WHERE b.ownerId = :userId OR b.visibility = 'PUBLIC'")
+    @org.springframework.data.jpa.repository.Query("SELECT b FROM Board b WHERE b.ownerId = :userId OR b.visibility = com.ishan.syncCanvas.board.entity.Visibility.PUBLIC")
     Page<Board> findAccessibleBoards(@org.springframework.data.repository.query.Param("userId") UUID userId, Pageable pageable);
 
-    @org.springframework.data.jpa.repository.Query("SELECT b FROM Board b WHERE (b.ownerId = :userId OR b.visibility = 'PUBLIC') AND LOWER(b.name) LIKE LOWER(CONCAT('%', :name, '%'))")
+    @org.springframework.data.jpa.repository.Query("SELECT b FROM Board b WHERE (b.ownerId = :userId OR b.visibility = com.ishan.syncCanvas.board.entity.Visibility.PUBLIC) AND (LOWER(b.name) LIKE LOWER(CONCAT('%', :name, '%')) OR LOWER(CAST(b.id AS string)) LIKE LOWER(CONCAT('%', :name, '%')))")
     Page<Board> findAccessibleBoardsByName(@org.springframework.data.repository.query.Param("userId") UUID userId, @org.springframework.data.repository.query.Param("name") String name, Pageable pageable);
 
 }

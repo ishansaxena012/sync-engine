@@ -10,6 +10,7 @@ import com.ishan.syncCanvas.collaboration.exception.CollaborationException;
 import com.ishan.syncCanvas.collaboration.operation.Operation;
 import com.ishan.syncCanvas.collaboration.processor.OperationProcessor;
 import com.ishan.syncCanvas.collaboration.publisher.OperationPublisher;
+import com.ishan.syncCanvas.collaboration.publisher.RedisOperationBroadcaster;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +24,8 @@ public class CollaborationServiceImpl
         private final BoardSessionService boardSessionService;
         private final OperationProcessor operationProcessor;
         private final OperationPublisher operationPublisher;
+        private final OperationIdempotencyFilter operationIdempotencyFilter;
+        private final RedisOperationBroadcaster redisOperationBroadcaster;
         // private final CollaborationService collaborationService;
 
         private void validateBoard(
@@ -39,6 +42,11 @@ public class CollaborationServiceImpl
 
                 validateBoard(boardId, operation);
 
+                if (!operationIdempotencyFilter.registerIfNew(operation.operationId())) {
+                        log.debug("Duplicate operation {} on board {} ignored", operation.operationId(), boardId);
+                        return;
+                }
+
                 try {
                         // log.debug("Processing {} on board {}", operation.type(), boardId);
                         boardSessionService.openSession(boardId);
@@ -46,6 +54,7 @@ public class CollaborationServiceImpl
                         operationProcessor.process(operation);
                         // log.info("Processor finished.");
                         operationPublisher.publish(boardId, operation);
+                        redisOperationBroadcaster.broadcast(operation);
 
                 } catch (CollaborationException ex) {
 

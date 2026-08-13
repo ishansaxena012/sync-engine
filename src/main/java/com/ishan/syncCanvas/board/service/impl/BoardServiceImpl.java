@@ -37,11 +37,12 @@ public class BoardServiceImpl implements BoardService {
 
     @Override
     public BoardResponse createBoard(UUID ownerId, CreateBoardRequest request) {
-        log.info("Creating board with name: {}", request.getName());
+        log.info("Creating board with name: {}, visibility: {}", request.getName(), request.getVisibility());
+        Visibility visibility = request.getVisibility() != null ? request.getVisibility() : Visibility.PRIVATE;
         Board board = Board.builder()
                 .name(request.getName())
                 .ownerId(ownerId)
-                .visibility(Visibility.PRIVATE)
+                .visibility(visibility)
                 .build();
         Board savedBoard = boardRepository.save(board);
         log.info("Board created successfully. id={}", savedBoard.getId());

@@ -5,5 +5,6 @@ public enum OperationType {
     MOVE_OBJECT,
     DELETE_OBJECT,
     CHANGE_PAYLOAD,
-    ROTATE_OBJECT
+    ROTATE_OBJECT,
+    BULK_MOVE_OBJECT
 }

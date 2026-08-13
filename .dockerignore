@@ -1,0 +1,11 @@
+target/
+.git/
+.idea/
+.vscode/
+.mvn/wrapper/maven-wrapper.jar
+*.iml
+*.log
+hs_err_pid*.log
+dist/
+node_modules/
+.claude/
