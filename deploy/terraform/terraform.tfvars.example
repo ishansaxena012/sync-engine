@@ -1,0 +1,16 @@
+# Copy to terraform.tfvars and fill in real values.
+# terraform.tfvars is gitignored — never commit it (it holds secrets).
+
+aws_region   = "ap-south-1"
+project_name = "syncengine"
+
+db_url      = "jdbc:postgresql://aws-1-ap-south-1.pooler.supabase.com:5432/postgres"
+db_username = ""
+db_password = ""
+
+jwt_secret = ""
+
+cors_allowed_origins = "https://your-frontend-domain.example"
+google_client_id     = ""
+
+desired_count = 1

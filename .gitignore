@@ -37,3 +37,11 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Terraform ###
+deploy/terraform/.terraform/
+deploy/terraform/.terraform.lock.hcl
+deploy/terraform/*.tfstate
+deploy/terraform/*.tfstate.*
+deploy/terraform/*.tfvars
+!deploy/terraform/*.tfvars.example
