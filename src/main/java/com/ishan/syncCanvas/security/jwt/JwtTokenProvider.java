@@ -49,12 +49,34 @@ public class JwtTokenProvider {
         Date expiryDate = new Date(now.getTime() + refreshTokenExpirationMs);
 
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())
                 .subject(userId.toString())
                 .claim("type", "REFRESH")
                 .issuedAt(now)
                 .expiration(expiryDate)
                 .signWith(key)
                 .compact();
+    }
+
+    /** ID (jti claim) used to track/revoke this specific refresh token in Redis. */
+    public String getTokenId(String token) {
+        Claims claims = Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
+
+        return claims.getId();
+    }
+
+    public Date getExpiration(String token) {
+        Claims claims = Jwts.parser()
+                .verifyWith(key)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
+
+        return claims.getExpiration();
     }
 
     public UUID getUserIdFromToken(String token) {

@@ -8,6 +8,9 @@ import com.ishan.syncCanvas.board.entity.Visibility;
 import com.ishan.syncCanvas.board.mapper.BoardMapper;
 import com.ishan.syncCanvas.board.repository.BoardRepository;
 import com.ishan.syncCanvas.board.service.BoardService;
+import com.ishan.syncCanvas.canvas.repository.CanvasObjectRepository;
+import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
+import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
 import com.ishan.syncCanvas.common.exception.BoardNotFoundException;
 import com.ishan.syncCanvas.user.service.UserService;
 import com.ishan.syncCanvas.user.dto.UserProfileResponse;
@@ -29,6 +32,9 @@ public class BoardServiceImpl implements BoardService {
     private static final Logger log = LoggerFactory.getLogger(BoardServiceImpl.class);
     private final BoardRepository boardRepository;
     private final UserService userService;
+    private final CanvasObjectRepository canvasObjectRepository;
+    private final BoardSessionManager boardSessionManager;
+    private final DirtySessionTracker dirtySessionTracker;
 
     private BoardResponse mapToResponse(Board board) {
         UserProfileResponse owner = userService.getUserProfile(board.getOwnerId());
@@ -96,6 +102,12 @@ public class BoardServiceImpl implements BoardService {
             throw new org.springframework.security.access.AccessDeniedException("You do not have permission to delete this board");
         }
 
+        // Evict any live in-memory session first so the persistence scheduler can't
+        // resurrect the rows we're about to delete out from under us.
+        boardSessionManager.remove(id);
+        dirtySessionTracker.clearDirty(id);
+
+        canvasObjectRepository.deleteByBoardId(id);
         boardRepository.delete(board);
     }
 

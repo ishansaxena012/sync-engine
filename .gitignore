@@ -45,3 +45,5 @@ deploy/terraform/*.tfstate
 deploy/terraform/*.tfstate.*
 deploy/terraform/*.tfvars
 !deploy/terraform/*.tfvars.example
+
+.claude/

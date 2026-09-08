@@ -8,11 +8,11 @@ import java.util.UUID;
 
 public interface CanvasObjectService {
 
-    CanvasObjectResponse createObject(CreateCanvasObjectRequest request);
+    CanvasObjectResponse createObject(UUID userId, CreateCanvasObjectRequest request);
 
     List<CanvasObjectResponse> getObjectsByBoard(UUID boardId);
 
-    void deleteObject(UUID objectId);
+    void deleteObject(UUID userId, UUID objectId);
 
     // Operation-specific update methods
     CanvasObjectResponse moveObject(UUID objectId, double x, double y, int zindex);

@@ -49,7 +49,17 @@ public class RedisOperationSubscriber implements MessageListener {
             Operation operation = envelope.operation();
 
             if (sessionManager.exists(operation.boardId())) {
-                operationProcessor.process(operation);
+                try {
+                    operationProcessor.process(operation);
+                } catch (Exception ex) {
+                    // The operation was already accepted and applied on the originating
+                    // instance — this instance's local session state may now be behind,
+                    // but its own WebSocket clients must still see the update, so the
+                    // re-broadcast below must not be skipped just because local
+                    // application failed.
+                    log.error("Failed to apply operation {} from Redis to local session for board {}",
+                            operation.operationId(), operation.boardId(), ex);
+                }
             }
 
             webSocketOperationPublisher.publish(operation.boardId(), operation);

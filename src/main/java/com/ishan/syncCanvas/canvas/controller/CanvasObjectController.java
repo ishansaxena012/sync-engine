@@ -5,10 +5,12 @@ import com.ishan.syncCanvas.canvas.dto.CreateCanvasObjectRequest;
 import com.ishan.syncCanvas.canvas.service.CanvasObjectService;
 import com.ishan.syncCanvas.common.response.ApiResponse;
 import com.ishan.syncCanvas.common.response.ResponseUtil;
+import com.ishan.syncCanvas.security.user.UserPrincipal;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
@@ -22,9 +24,10 @@ public class CanvasObjectController {
 
     @PostMapping
     public ResponseEntity<ApiResponse<CanvasObjectResponse>> createObject(
+            @AuthenticationPrincipal UserPrincipal userPrincipal,
             @Valid @RequestBody CreateCanvasObjectRequest request) {
 
-        CanvasObjectResponse response = canvasObjectService.createObject(request);
+        CanvasObjectResponse response = canvasObjectService.createObject(userPrincipal.getId(), request);
 
         return ResponseUtil.success(
                 response,
@@ -34,9 +37,10 @@ public class CanvasObjectController {
 
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> deleteObject(
+            @AuthenticationPrincipal UserPrincipal userPrincipal,
             @PathVariable UUID id) {
 
-        canvasObjectService.deleteObject(id);
+        canvasObjectService.deleteObject(userPrincipal.getId(), id);
 
         return ResponseUtil.success(
                 "Canvas object deleted successfully");

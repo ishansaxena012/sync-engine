@@ -1,5 +1,6 @@
 package com.ishan.syncCanvas.canvas.service.impl;
 
+import com.ishan.syncCanvas.board.entity.Board;
 import com.ishan.syncCanvas.board.repository.BoardRepository;
 import com.ishan.syncCanvas.canvas.domain.CanvasPayload;
 import com.ishan.syncCanvas.canvas.dto.CanvasObjectResponse;
@@ -14,6 +15,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,12 +29,16 @@ public class CanvasObjectServiceImpl implements CanvasObjectService {
 
     @Override
     @Transactional
-    public CanvasObjectResponse createObject(CreateCanvasObjectRequest request) {
-        if (!boardRepository.existsById(request.getBoardId())) {
-            throw new BoardNotFoundException("Board not found with id: " + request.getBoardId());
+    public CanvasObjectResponse createObject(UUID userId, CreateCanvasObjectRequest request) {
+        Board board = boardRepository.findById(request.getBoardId())
+                .orElseThrow(() -> new BoardNotFoundException("Board not found with id: " + request.getBoardId()));
+
+        if (!board.getOwnerId().equals(userId)) {
+            throw new AccessDeniedException("You do not have permission to add objects to this board");
         }
 
         CanvasObject entity = canvasObjectMapper.toEntity(request);
+        entity.setCreatedBy(userId);
         CanvasObject saved = canvasObjectRepository.save(entity);
         return canvasObjectMapper.toResponse(saved);
     }
@@ -52,10 +58,17 @@ public class CanvasObjectServiceImpl implements CanvasObjectService {
 
     @Override
     @Transactional
-    public void deleteObject(UUID objectId) {
-        if (!canvasObjectRepository.existsById(objectId)) {
-            throw new CanvasObjectNotFoundException(objectId);
+    public void deleteObject(UUID userId, UUID objectId) {
+        CanvasObject entity = canvasObjectRepository.findById(objectId)
+                .orElseThrow(() -> new CanvasObjectNotFoundException(objectId));
+
+        Board board = boardRepository.findById(entity.getBoardId())
+                .orElseThrow(() -> new BoardNotFoundException("Board not found with id: " + entity.getBoardId()));
+
+        if (!board.getOwnerId().equals(userId)) {
+            throw new AccessDeniedException("You do not have permission to delete objects from this board");
         }
+
         canvasObjectRepository.deleteById(objectId);
     }
 

@@ -6,6 +6,7 @@ import com.ishan.syncCanvas.security.dto.GoogleAuthRequest;
 import com.ishan.syncCanvas.security.dto.RefreshTokenRequest;
 import com.ishan.syncCanvas.security.dto.TokenResponse;
 import com.ishan.syncCanvas.security.jwt.JwtTokenProvider;
+import com.ishan.syncCanvas.security.jwt.RefreshTokenRevocationService;
 import com.ishan.syncCanvas.security.service.GoogleAuthService;
 import com.ishan.syncCanvas.user.dto.UserProfileResponse;
 import com.ishan.syncCanvas.user.entity.User;
@@ -27,6 +28,7 @@ public class AuthController {
     private final JwtTokenProvider tokenProvider;
     private final UserService userService;
     private final UserMapper userMapper;
+    private final RefreshTokenRevocationService refreshTokenRevocationService;
 
     @PostMapping("/google")
     public ResponseEntity<ApiResponse<TokenResponse>> authenticateGoogle(
@@ -52,8 +54,18 @@ public class AuthController {
             throw new IllegalArgumentException("Invalid or expired refresh token");
         }
 
+        String jti = tokenProvider.getTokenId(refreshToken);
+        if (refreshTokenRevocationService.isRevoked(jti)) {
+            throw new IllegalArgumentException("Invalid or expired refresh token");
+        }
+
         UUID userId = tokenProvider.getUserIdFromToken(refreshToken);
         User user = userService.getUserById(userId);
+
+        // Rotate: this refresh token is single-use. Revoking it immediately means a
+        // stolen-and-replayed refresh token stops working the moment the legitimate
+        // client refreshes, instead of staying valid for its full 7-day lifetime.
+        refreshTokenRevocationService.revoke(jti, tokenProvider.getExpiration(refreshToken));
 
         String newAccessToken = tokenProvider.generateAccessToken(user.getId(), user.getEmail(), user.getName());
         String newRefreshToken = tokenProvider.generateRefreshToken(user.getId());
@@ -65,8 +77,17 @@ public class AuthController {
     }
 
     @PostMapping("/logout")
-    public ResponseEntity<ApiResponse<Void>> logout() {
-        // Stateless JWT logout - frontend drops token from storage
+    public ResponseEntity<ApiResponse<Void>> logout(
+            @RequestBody(required = false) RefreshTokenRequest request) {
+
+        if (request != null && request.refreshToken() != null
+                && tokenProvider.validateToken(request.refreshToken())
+                && "REFRESH".equals(tokenProvider.getTokenType(request.refreshToken()))) {
+
+            String jti = tokenProvider.getTokenId(request.refreshToken());
+            refreshTokenRevocationService.revoke(jti, tokenProvider.getExpiration(request.refreshToken()));
+        }
+
         return ResponseUtil.success("Logged out successfully");
     }
 }

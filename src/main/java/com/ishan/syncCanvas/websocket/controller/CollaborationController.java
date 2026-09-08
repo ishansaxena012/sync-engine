@@ -5,6 +5,7 @@ import com.ishan.syncCanvas.collaboration.service.CollaborationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import java.security.Principal;
 import java.util.*;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
@@ -24,11 +25,13 @@ public class CollaborationController {
     @MessageMapping("/boards/{boardId}/operations")
     public void processOperation(
             @DestinationVariable UUID boardId,
-            Operation operation) {
+            Operation operation,
+            Principal principal) {
 
         log.info("Controller received {}", operation.type());
         log.info("Received operation {}", operation);
-        collaborationService.processOperation(boardId, operation);
+        UUID authenticatedUserId = UUID.fromString(principal.getName());
+        collaborationService.processOperation(boardId, operation, authenticatedUserId);
     }
 
     @MessageExceptionHandler

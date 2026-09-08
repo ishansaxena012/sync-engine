@@ -7,6 +7,7 @@ public interface CollaborationService {
 
     void processOperation(
             UUID boardId,
-            Operation operation);
+            Operation operation,
+            UUID authenticatedUserId);
 
 }

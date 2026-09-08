@@ -57,4 +57,22 @@ public class OperationIdempotencyFilter {
             return true;
         }
     }
+
+    /**
+     * Removes an operation ID that was registered via {@link #registerIfNew} but whose
+     * processing subsequently failed. Without this, a legitimate client retry after a
+     * failed operation (a normal idempotent-retry pattern) would be silently dropped as
+     * a duplicate for the rest of the TTL window, even though the original never
+     * actually applied.
+     */
+    public void unregister(UUID operationId) {
+        if (operationId == null) {
+            return;
+        }
+        try {
+            redisTemplate.delete(KEY_PREFIX + operationId);
+        } catch (Exception ex) {
+            log.error("Failed to unregister operation {} after processing failure", operationId, ex);
+        }
+    }
 }

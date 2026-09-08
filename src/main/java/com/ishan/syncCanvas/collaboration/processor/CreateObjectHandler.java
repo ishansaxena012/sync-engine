@@ -43,7 +43,10 @@ public class CreateObjectHandler
             if (request == null) {
                 throw new IllegalArgumentException("Create object request cannot be null");
             }
-            UUID objectId = request.getId() != null ? request.getId() : UUID.randomUUID();
+            // Object IDs are always server-generated on create — never trust a
+            // client-supplied id, since it could collide with (and overwrite) an
+            // existing object on another board once persisted.
+            UUID objectId = UUID.randomUUID();
             request.setId(objectId);
             request.setBoardId(operation.boardId()); // Ensure broadcast has the correct boardId
             request.setCreatedBy(operation.userId());

@@ -8,6 +8,8 @@ import com.ishan.syncCanvas.user.entity.User;
 import com.ishan.syncCanvas.user.service.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
@@ -18,17 +20,23 @@ public class GoogleAuthService {
 
     private final UserService userService;
     private final String clientId;
+    private final Environment environment;
 
     public GoogleAuthService(
             UserService userService,
-            @Value("${app.google.client-id}") String clientId) {
+            @Value("${app.google.client-id}") String clientId,
+            Environment environment) {
         this.userService = userService;
         this.clientId = clientId;
+        this.environment = environment;
     }
 
     public User authenticateGoogleToken(String idTokenString) {
-        // Dev fallback for testing without Google Cloud Console setup
-        if (idTokenString != null && idTokenString.startsWith("dev-token:")) {
+        // Dev fallback for testing without Google Cloud Console setup. Hard-gated
+        // behind the "prod" profile so it can never be exploited in a production
+        // deployment — SPRING_PROFILES_ACTIVE=prod must be set on that environment.
+        boolean isProd = environment.acceptsProfiles(Profiles.of("prod"));
+        if (!isProd && idTokenString != null && idTokenString.startsWith("dev-token:")) {
             String[] parts = idTokenString.split(":");
             String email = parts.length > 1 ? parts[1] : "dev@example.com";
             String name = parts.length > 2 ? parts[2] : "Dev User";
@@ -40,7 +48,7 @@ public class GoogleAuthService {
             GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(
                     new NetHttpTransport(),
                     new GsonFactory())
-                    .setAudience(clientId.equals("mock-dev-google-client-id") ? null : Collections.singletonList(clientId))
+                    .setAudience(Collections.singletonList(clientId))
                     .build();
 
             GoogleIdToken idToken = verifier.verify(idTokenString);
