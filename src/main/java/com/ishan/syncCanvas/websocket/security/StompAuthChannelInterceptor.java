@@ -1,5 +1,6 @@
 package com.ishan.syncCanvas.websocket.security;
 
+import com.ishan.syncCanvas.collaboration.service.BoardAccessGuard;
 import com.ishan.syncCanvas.security.jwt.JwtTokenProvider;
 import com.ishan.syncCanvas.security.user.UserPrincipal;
 import com.ishan.syncCanvas.user.entity.User;
@@ -17,7 +18,10 @@ import org.springframework.messaging.support.MessageHeaderAccessor;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.security.Principal;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Requires a valid access JWT on every STOMP CONNECT frame.
@@ -37,8 +41,11 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class StompAuthChannelInterceptor implements ChannelInterceptor {
 
+    private static final Pattern CURSOR_TOPIC = Pattern.compile("^/topic/boards/([^/]+)/cursor$");
+
     private final JwtTokenProvider tokenProvider;
     private final UserService userService;
+    private final BoardAccessGuard boardAccessGuard;
 
     @Override
     public Message<?> preSend(@NonNull Message<?> message, @NonNull MessageChannel channel) {
@@ -63,6 +70,20 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
             UUID userId = tokenProvider.getUserIdFromToken(token);
             User user = userService.getUserById(userId);
             accessor.setUser(UserPrincipal.create(user));
+
+        } else if (accessor != null && StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
+            // Cursor topic subscriptions carry the same privacy requirement as sending
+            // cursor updates does — without this, any authenticated user could
+            // subscribe to a private board's cursor topic and passively watch other
+            // users' positions even though they could never send one themselves.
+            UUID cursorBoardId = extractCursorBoardId(accessor.getDestination());
+            if (cursorBoardId != null) {
+                Principal user = accessor.getUser();
+                if (user == null) {
+                    throw new MessagingException("Unauthenticated subscription rejected");
+                }
+                boardAccessGuard.assertAccessible(cursorBoardId, UUID.fromString(user.getName()));
+            }
         }
 
         return message;
@@ -74,5 +95,20 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
             return authHeader.substring(7);
         }
         return accessor.getFirstNativeHeader("token");
+    }
+
+    private static UUID extractCursorBoardId(String destination) {
+        if (destination == null) {
+            return null;
+        }
+        Matcher matcher = CURSOR_TOPIC.matcher(destination);
+        if (!matcher.matches()) {
+            return null;
+        }
+        try {
+            return UUID.fromString(matcher.group(1));
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
     }
 }

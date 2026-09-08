@@ -4,11 +4,7 @@ import java.time.Instant;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
-import com.ishan.syncCanvas.board.entity.Board;
-import com.ishan.syncCanvas.board.entity.Visibility;
-import com.ishan.syncCanvas.board.repository.BoardRepository;
 import com.ishan.syncCanvas.collaboration.dto.OperationErrorResponse;
-import com.ishan.syncCanvas.collaboration.exception.BoardAccessDeniedException;
 import com.ishan.syncCanvas.collaboration.exception.BoardMismatchException;
 import com.ishan.syncCanvas.collaboration.exception.CollaborationException;
 import com.ishan.syncCanvas.collaboration.operation.Operation;
@@ -30,7 +26,7 @@ public class CollaborationServiceImpl
         private final OperationPublisher operationPublisher;
         private final OperationIdempotencyFilter operationIdempotencyFilter;
         private final RedisOperationBroadcaster redisOperationBroadcaster;
-        private final BoardRepository boardRepository;
+        private final BoardAccessGuard boardAccessGuard;
 
         private void validateBoard(
                         UUID boardId,
@@ -38,21 +34,6 @@ public class CollaborationServiceImpl
 
                 if (!boardId.equals(operation.boardId())) {
                         throw new BoardMismatchException();
-                }
-        }
-
-        /**
-         * Confirms the authenticated caller may access this board before any operation
-         * touching it is applied. Authenticating the STOMP connection alone is not
-         * enough — without this, any logged-in user could send operations for any
-         * board's ID, private or not.
-         */
-        private void assertBoardAccessible(UUID boardId, UUID userId) {
-                Board board = boardRepository.findById(boardId)
-                                .orElseThrow(() -> new BoardAccessDeniedException("Board not found: " + boardId));
-
-                if (!board.getOwnerId().equals(userId) && board.getVisibility() != Visibility.PUBLIC) {
-                        throw new BoardAccessDeniedException("You do not have access to board " + boardId);
                 }
         }
 
@@ -67,7 +48,7 @@ public class CollaborationServiceImpl
                 }
 
                 try {
-                        assertBoardAccessible(boardId, authenticatedUserId);
+                        boardAccessGuard.assertAccessible(boardId, authenticatedUserId);
                         // log.debug("Processing {} on board {}", operation.type(), boardId);
                         boardSessionService.openSession(boardId);
                         // log.info("Calling processor...");
