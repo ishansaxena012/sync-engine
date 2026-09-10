@@ -41,7 +41,11 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class StompAuthChannelInterceptor implements ChannelInterceptor {
 
-    private static final Pattern CURSOR_TOPIC = Pattern.compile("^/topic/boards/([^/]+)/cursor$");
+    // Matches both /topic/boards/{boardId}/cursor and /topic/boards/{boardId}/presence —
+    // both are ephemeral, board-scoped broadcast topics with the same privacy
+    // requirement as sending to them: an authenticated user with no access to the board
+    // must not be able to passively subscribe and watch either stream either.
+    private static final Pattern BOARD_SCOPED_TOPIC = Pattern.compile("^/topic/boards/([^/]+)/(?:cursor|presence)$");
 
     private final JwtTokenProvider tokenProvider;
     private final UserService userService;
@@ -72,17 +76,13 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
             accessor.setUser(UserPrincipal.create(user));
 
         } else if (accessor != null && StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
-            // Cursor topic subscriptions carry the same privacy requirement as sending
-            // cursor updates does — without this, any authenticated user could
-            // subscribe to a private board's cursor topic and passively watch other
-            // users' positions even though they could never send one themselves.
-            UUID cursorBoardId = extractCursorBoardId(accessor.getDestination());
-            if (cursorBoardId != null) {
+            UUID scopedBoardId = extractBoardScopedTopicId(accessor.getDestination());
+            if (scopedBoardId != null) {
                 Principal user = accessor.getUser();
                 if (user == null) {
                     throw new MessagingException("Unauthenticated subscription rejected");
                 }
-                boardAccessGuard.assertAccessible(cursorBoardId, UUID.fromString(user.getName()));
+                boardAccessGuard.assertAccessible(scopedBoardId, UUID.fromString(user.getName()));
             }
         }
 
@@ -97,11 +97,11 @@ public class StompAuthChannelInterceptor implements ChannelInterceptor {
         return accessor.getFirstNativeHeader("token");
     }
 
-    private static UUID extractCursorBoardId(String destination) {
+    private static UUID extractBoardScopedTopicId(String destination) {
         if (destination == null) {
             return null;
         }
-        Matcher matcher = CURSOR_TOPIC.matcher(destination);
+        Matcher matcher = BOARD_SCOPED_TOPIC.matcher(destination);
         if (!matcher.matches()) {
             return null;
         }
