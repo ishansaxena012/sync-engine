@@ -31,10 +31,10 @@ public class RedisOperationBroadcaster {
     @Getter
     private final String instanceId = UUID.randomUUID().toString();
 
-    public void broadcast(Operation operation) {
+    public void broadcast(long sequence, Operation operation) {
         try {
             String json = objectMapper.writeValueAsString(
-                    new RedisOperationMessage(instanceId, operation));
+                    new RedisOperationMessage(instanceId, sequence, operation));
             redisTemplate.convertAndSend(boardOperationsTopic.getTopic(), json);
         } catch (Exception ex) {
             log.error("Failed to broadcast operation {} to Redis", operation.operationId(), ex);

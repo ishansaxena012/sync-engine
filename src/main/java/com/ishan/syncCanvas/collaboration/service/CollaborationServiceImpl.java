@@ -8,10 +8,12 @@ import com.ishan.syncCanvas.collaboration.dto.OperationErrorResponse;
 import com.ishan.syncCanvas.collaboration.exception.BoardMismatchException;
 import com.ishan.syncCanvas.collaboration.exception.CollaborationException;
 import com.ishan.syncCanvas.collaboration.operation.Operation;
+import com.ishan.syncCanvas.collaboration.operation.SequencedOperation;
 import com.ishan.syncCanvas.collaboration.processor.OperationProcessor;
 import com.ishan.syncCanvas.collaboration.publisher.OperationPublisher;
 import com.ishan.syncCanvas.collaboration.publisher.RedisOperationBroadcaster;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionService;
+import com.ishan.syncCanvas.collaboration.sync.OperationSequenceService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -27,6 +29,7 @@ public class CollaborationServiceImpl
         private final OperationIdempotencyFilter operationIdempotencyFilter;
         private final RedisOperationBroadcaster redisOperationBroadcaster;
         private final BoardAccessGuard boardAccessGuard;
+        private final OperationSequenceService operationSequenceService;
 
         private void validateBoard(
                         UUID boardId,
@@ -49,13 +52,21 @@ public class CollaborationServiceImpl
 
                 try {
                         boardAccessGuard.assertAccessible(boardId, authenticatedUserId);
-                        // log.debug("Processing {} on board {}", operation.type(), boardId);
                         boardSessionService.openSession(boardId);
-                        // log.info("Calling processor...");
                         operationProcessor.process(operation);
-                        // log.info("Processor finished.");
-                        operationPublisher.publish(boardId, operation);
-                        redisOperationBroadcaster.broadcast(operation);
+
+                        // Sequence is assigned only after the operation has actually been
+                        // applied, so a rejected operation (version mismatch, missing
+                        // object, ...) never consumes a number. Every published sequence is
+                        // therefore a real, applied operation with no holes — clients can
+                        // treat any gap as genuinely missed events rather than a false
+                        // alarm from someone else's failed edit.
+                        long sequence = operationSequenceService.nextSequence(boardId);
+                        SequencedOperation sequencedOperation = new SequencedOperation(sequence, operation);
+
+                        operationSequenceService.recordForReplay(boardId, sequencedOperation);
+                        operationPublisher.publish(boardId, sequencedOperation);
+                        redisOperationBroadcaster.broadcast(sequence, operation);
 
                 } catch (CollaborationException ex) {
 

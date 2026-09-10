@@ -41,11 +41,12 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class StompAuthChannelInterceptor implements ChannelInterceptor {
 
-    // Matches both /topic/boards/{boardId}/cursor and /topic/boards/{boardId}/presence —
-    // both are ephemeral, board-scoped broadcast topics with the same privacy
-    // requirement as sending to them: an authenticated user with no access to the board
-    // must not be able to passively subscribe and watch either stream either.
-    private static final Pattern BOARD_SCOPED_TOPIC = Pattern.compile("^/topic/boards/([^/]+)/(?:cursor|presence)$");
+    // Matches /topic/boards/{boardId} and every subtopic under it (cursor, presence,
+    // errors, canvas operations, anything added later). Subscribing to any of these
+    // requires the same board access as sending to them — otherwise an authenticated
+    // user with no access to a private board could still subscribe and passively read
+    // its live canvas operations, even though they can't send any themselves.
+    private static final Pattern BOARD_SCOPED_TOPIC = Pattern.compile("^/topic/boards/([^/]+)(?:/.*)?$");
 
     private final JwtTokenProvider tokenProvider;
     private final UserService userService;

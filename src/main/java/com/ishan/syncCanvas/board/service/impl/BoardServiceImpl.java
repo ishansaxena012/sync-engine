@@ -11,6 +11,7 @@ import com.ishan.syncCanvas.board.service.BoardService;
 import com.ishan.syncCanvas.canvas.repository.CanvasObjectRepository;
 import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
+import com.ishan.syncCanvas.collaboration.sync.OperationSequenceService;
 import com.ishan.syncCanvas.common.exception.BoardNotFoundException;
 import com.ishan.syncCanvas.user.service.UserService;
 import com.ishan.syncCanvas.user.dto.UserProfileResponse;
@@ -35,6 +36,7 @@ public class BoardServiceImpl implements BoardService {
     private final CanvasObjectRepository canvasObjectRepository;
     private final BoardSessionManager boardSessionManager;
     private final DirtySessionTracker dirtySessionTracker;
+    private final OperationSequenceService operationSequenceService;
 
     private BoardResponse mapToResponse(Board board) {
         UserProfileResponse owner = userService.getUserProfile(board.getOwnerId());
@@ -106,6 +108,7 @@ public class BoardServiceImpl implements BoardService {
         // resurrect the rows we're about to delete out from under us.
         boardSessionManager.remove(id);
         dirtySessionTracker.clearDirty(id);
+        operationSequenceService.clearBoardState(id);
 
         canvasObjectRepository.deleteByBoardId(id);
         boardRepository.delete(board);

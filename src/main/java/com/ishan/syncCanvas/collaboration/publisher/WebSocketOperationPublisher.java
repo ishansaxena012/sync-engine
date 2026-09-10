@@ -1,7 +1,7 @@
 package com.ishan.syncCanvas.collaboration.publisher;
 
 import com.ishan.syncCanvas.collaboration.dto.OperationErrorResponse;
-import com.ishan.syncCanvas.collaboration.operation.Operation;
+import com.ishan.syncCanvas.collaboration.operation.SequencedOperation;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -18,11 +18,11 @@ public class WebSocketOperationPublisher implements OperationPublisher {
     private final SimpMessagingTemplate messagingTemplate;
 
     @Override
-    public void publish(UUID boardId, Operation operation) {
-        log.info("Publishing {}", operation.type());
+    public void publish(UUID boardId, SequencedOperation sequencedOperation) {
+        log.info("Publishing {} (seq {})", sequencedOperation.operation().type(), sequencedOperation.sequence());
         messagingTemplate.convertAndSend(
                 "/topic/boards/" + boardId,
-                operation);
+                sequencedOperation);
     }
 
     @Override

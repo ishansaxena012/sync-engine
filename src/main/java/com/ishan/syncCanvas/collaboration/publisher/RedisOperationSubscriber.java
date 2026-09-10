@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ishan.syncCanvas.collaboration.operation.Operation;
+import com.ishan.syncCanvas.collaboration.operation.SequencedOperation;
 import com.ishan.syncCanvas.collaboration.processor.OperationProcessor;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
 
@@ -62,7 +63,11 @@ public class RedisOperationSubscriber implements MessageListener {
                 }
             }
 
-            webSocketOperationPublisher.publish(operation.boardId(), operation);
+            // Relay the sequence the originating instance already assigned — never
+            // assign a fresh one here, the counter is shared and this op already has one.
+            webSocketOperationPublisher.publish(
+                    operation.boardId(),
+                    new SequencedOperation(envelope.sequence(), operation));
 
         } catch (Exception ex) {
             log.error("Failed to apply operation received from Redis", ex);
