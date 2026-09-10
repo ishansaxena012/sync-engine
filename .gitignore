@@ -47,3 +47,5 @@ deploy/terraform/*.tfvars
 !deploy/terraform/*.tfvars.example
 
 .claude/
+.env.bak
+hs_err_pid19980.log
