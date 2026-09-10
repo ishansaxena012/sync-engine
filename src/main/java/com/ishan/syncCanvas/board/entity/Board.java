@@ -25,4 +25,13 @@ public class Board extends BaseEntity {
     @Column(nullable = false)
     private Visibility visibility;
 
+    /**
+     * Authoritative per-board operation sequence. Incremented only inside the same
+     * PostgreSQL transaction that inserts the corresponding {@code board_event}, under a
+     * row lock, so one committed operation is always exactly one durable event with
+     * exactly one sequence — and a rolled-back transaction never leaves a gap.
+     */
+    @Column(nullable = false)
+    private long sequence;
+
 }

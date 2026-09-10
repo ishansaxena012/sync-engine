@@ -64,32 +64,13 @@ class OperationSequenceServiceTest {
         return objectMapper.writeValueAsString(op);
     }
 
-    // ---- sequence generation ----
+    // ---- sequence mirror ----
 
     @Test
-    void firstOperationGetsSequenceOne() {
-        when(valueOperations.increment("sequence:board:" + boardId)).thenReturn(1L);
+    void setCurrentSequenceMirrorsCommittedValueIntoRedis() {
+        service.setCurrentSequence(boardId, 42L);
 
-        assertThat(service.nextSequence(boardId)).isEqualTo(1L);
-    }
-
-    @Test
-    void sequenceIncrementsViaRedisNotLocalState() {
-        when(valueOperations.increment("sequence:board:" + boardId)).thenReturn(7L, 8L, 9L);
-
-        assertThat(service.nextSequence(boardId)).isEqualTo(7L);
-        assertThat(service.nextSequence(boardId)).isEqualTo(8L);
-        assertThat(service.nextSequence(boardId)).isEqualTo(9L);
-        verify(valueOperations, org.mockito.Mockito.times(3)).increment("sequence:board:" + boardId);
-    }
-
-    @Test
-    void sequencesAreBoardScoped() {
-        when(valueOperations.increment("sequence:board:" + boardId)).thenReturn(5L);
-        when(valueOperations.increment("sequence:board:" + otherBoardId)).thenReturn(1L);
-
-        assertThat(service.nextSequence(boardId)).isEqualTo(5L);
-        assertThat(service.nextSequence(otherBoardId)).isEqualTo(1L);
+        verify(valueOperations).set("sequence:board:" + boardId, "42");
     }
 
     @Test
@@ -116,10 +97,8 @@ class OperationSequenceServiceTest {
     // ---- sync response ----
 
     @Test
-    void upToDateWhenClientAlreadyHasCurrentSequence() {
-        when(valueOperations.get("sequence:board:" + boardId)).thenReturn("10");
-
-        SyncResponse response = service.buildSyncResponse(boardId, new SyncRequest(10L));
+    void upToDateWhenClientAlreadyHasAuthoritativeCurrentSequence() {
+        SyncResponse response = service.buildSyncResponse(boardId, new SyncRequest(10L), 10L);
 
         assertThat(response.status()).isEqualTo(SyncStatus.UP_TO_DATE);
         assertThat(response.currentSequence()).isEqualTo(10L);
@@ -128,10 +107,18 @@ class OperationSequenceServiceTest {
     }
 
     @Test
-    void nullLastSequenceIsTreatedAsZero() {
-        when(valueOperations.get("sequence:board:" + boardId)).thenReturn("0");
+    void twoArgOverloadFallsBackToRedisViewOfCurrentSequence() {
+        when(valueOperations.get("sequence:board:" + boardId)).thenReturn("10");
 
-        SyncResponse response = service.buildSyncResponse(boardId, new SyncRequest(null));
+        SyncResponse response = service.buildSyncResponse(boardId, new SyncRequest(10L));
+
+        assertThat(response.status()).isEqualTo(SyncStatus.UP_TO_DATE);
+        assertThat(response.currentSequence()).isEqualTo(10L);
+    }
+
+    @Test
+    void nullLastSequenceIsTreatedAsZero() {
+        SyncResponse response = service.buildSyncResponse(boardId, new SyncRequest(null), 0L);
 
         assertThat(response.status()).isEqualTo(SyncStatus.UP_TO_DATE);
     }
@@ -143,7 +130,6 @@ class OperationSequenceServiceTest {
         SequencedOperation s12 = new SequencedOperation(12L, move(boardId));
         SequencedOperation s13 = new SequencedOperation(13L, move(boardId));
 
-        when(valueOperations.get("sequence:board:" + boardId)).thenReturn("13");
         when(zSetOperations.rangeWithScores(key, 0, 0))
                 .thenReturn(Set.of(new DefaultTypedTuple<>(json(s11), 11.0)));
         // Deliberately out of order to prove the service re-sorts by sequence.
@@ -153,7 +139,7 @@ class OperationSequenceServiceTest {
         raw.add(json(s12));
         when(zSetOperations.rangeByScore(key, 11.0, Double.MAX_VALUE)).thenReturn(raw);
 
-        SyncResponse response = service.buildSyncResponse(boardId, new SyncRequest(10L));
+        SyncResponse response = service.buildSyncResponse(boardId, new SyncRequest(10L), 13L);
 
         assertThat(response.status()).isEqualTo(SyncStatus.OK);
         assertThat(response.currentSequence()).isEqualTo(13L);
@@ -163,10 +149,9 @@ class OperationSequenceServiceTest {
 
     @Test
     void syncRequiredWhenBufferIsEmptyButBoardHasHistory() {
-        when(valueOperations.get("sequence:board:" + boardId)).thenReturn("50");
         when(zSetOperations.rangeWithScores("operations:board:" + boardId, 0, 0)).thenReturn(Set.of());
 
-        SyncResponse response = service.buildSyncResponse(boardId, new SyncRequest(10L));
+        SyncResponse response = service.buildSyncResponse(boardId, new SyncRequest(10L), 50L);
 
         assertThat(response.status()).isEqualTo(SyncStatus.SYNC_REQUIRED);
         assertThat(response.currentSequence()).isEqualTo(50L);
@@ -179,11 +164,10 @@ class OperationSequenceServiceTest {
         // 11..29 have been evicted, so a "replay" would silently skip them.
         String key = "operations:board:" + boardId;
         SequencedOperation s30 = new SequencedOperation(30L, move(boardId));
-        when(valueOperations.get("sequence:board:" + boardId)).thenReturn("40");
         when(zSetOperations.rangeWithScores(key, 0, 0))
                 .thenReturn(Set.of(new DefaultTypedTuple<>(json(s30), 30.0)));
 
-        SyncResponse response = service.buildSyncResponse(boardId, new SyncRequest(10L));
+        SyncResponse response = service.buildSyncResponse(boardId, new SyncRequest(10L), 40L);
 
         assertThat(response.status()).isEqualTo(SyncStatus.SYNC_REQUIRED);
         verify(zSetOperations, never()).rangeByScore(anyString(), anyDouble(), anyDouble());
@@ -193,12 +177,11 @@ class OperationSequenceServiceTest {
     void replayIsFineWhenOldestRetainedIsExactlyNextNeeded() throws Exception {
         String key = "operations:board:" + boardId;
         SequencedOperation s11 = new SequencedOperation(11L, move(boardId));
-        when(valueOperations.get("sequence:board:" + boardId)).thenReturn("11");
         when(zSetOperations.rangeWithScores(key, 0, 0))
                 .thenReturn(Set.of(new DefaultTypedTuple<>(json(s11), 11.0)));
         when(zSetOperations.rangeByScore(key, 11.0, Double.MAX_VALUE)).thenReturn(Set.of(json(s11)));
 
-        SyncResponse response = service.buildSyncResponse(boardId, new SyncRequest(10L));
+        SyncResponse response = service.buildSyncResponse(boardId, new SyncRequest(10L), 11L);
 
         assertThat(response.status()).isEqualTo(SyncStatus.OK);
         assertThat(response.operations()).hasSize(1);

@@ -11,6 +11,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.Objects;
+
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -35,44 +37,37 @@ public class ChangePayloadHandler
                                 + operation.boardId()));
 
         session.getLock().writeLock().lock();
-
         try {
-
-            if (operation.objectId() == null) {
-                throw new IllegalArgumentException("Object ID cannot be null");
-            }
-            log.info("Objects in session: {}", session.getObjects());
-            log.info("Looking for: {}", operation.objectId());
-
-            CanvasObject object = session.getObject(operation.objectId());
-
-            if (object == null) {
-                throw new ObjectNotFoundException(operation.objectId());
-            }
-            
-            if (operation.expectedVersion() != null && !java.util.Objects.equals(object.getVersion(), operation.expectedVersion())) {
-                throw new VersionMismatchException(
-                        operation.expectedVersion(),
-                        object.getVersion());
-            }
-
-            object.changePayload(operation.payload());
-
-            if (object.getVersion() != null) {
-                object.setVersion(object.getVersion() + 1);
-            } else {
-                object.setVersion(1L);
-            }
-
-            session.incrementVersion();
-            session.touch();
+            apply(operation, session, ApplyMode.LIVE);
             dirtySessionTracker.markDirty(operation.boardId());
-            log.debug(
-                    "Updated payload of object {} on board {}",
-                    operation.objectId(),
-                    operation.boardId());
         } finally {
             session.getLock().writeLock().unlock();
         }
+    }
+
+    @Override
+    public void apply(ChangePayloadOperation operation, BoardSession session, ApplyMode mode) {
+        if (operation.objectId() == null) {
+            throw new IllegalArgumentException("Object ID cannot be null");
+        }
+
+        CanvasObject object = session.getObject(operation.objectId());
+        if (object == null) {
+            throw new ObjectNotFoundException(operation.objectId());
+        }
+
+        if (mode == ApplyMode.LIVE
+                && operation.expectedVersion() != null
+                && !Objects.equals(object.getVersion(), operation.expectedVersion())) {
+            throw new VersionMismatchException(operation.expectedVersion(), object.getVersion());
+        }
+
+        object.changePayload(operation.payload());
+        object.setVersion(object.getVersion() != null ? object.getVersion() + 1 : 1L);
+
+        session.incrementVersion();
+        session.touch();
+
+        log.debug("Updated payload of object {} on board {} ({})", operation.objectId(), operation.boardId(), mode);
     }
 }

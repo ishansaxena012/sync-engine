@@ -9,6 +9,8 @@ import com.ishan.syncCanvas.board.mapper.BoardMapper;
 import com.ishan.syncCanvas.board.repository.BoardRepository;
 import com.ishan.syncCanvas.board.service.BoardService;
 import com.ishan.syncCanvas.canvas.repository.CanvasObjectRepository;
+import com.ishan.syncCanvas.collaboration.event.BoardEventRepository;
+import com.ishan.syncCanvas.collaboration.event.BoardSnapshotRepository;
 import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
 import com.ishan.syncCanvas.collaboration.sync.OperationSequenceService;
@@ -37,6 +39,8 @@ public class BoardServiceImpl implements BoardService {
     private final BoardSessionManager boardSessionManager;
     private final DirtySessionTracker dirtySessionTracker;
     private final OperationSequenceService operationSequenceService;
+    private final BoardEventRepository boardEventRepository;
+    private final BoardSnapshotRepository boardSnapshotRepository;
 
     private BoardResponse mapToResponse(Board board) {
         UserProfileResponse owner = userService.getUserProfile(board.getOwnerId());
@@ -110,6 +114,10 @@ public class BoardServiceImpl implements BoardService {
         dirtySessionTracker.clearDirty(id);
         operationSequenceService.clearBoardState(id);
 
+        // Explicit deletes alongside the ON DELETE CASCADE foreign keys, so the durable
+        // history is removed even on a schema where the cascade isn't present.
+        boardEventRepository.deleteByBoardId(id);
+        boardSnapshotRepository.deleteByBoardId(id);
         canvasObjectRepository.deleteByBoardId(id);
         boardRepository.delete(board);
     }

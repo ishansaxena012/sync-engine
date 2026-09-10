@@ -22,4 +22,12 @@ public interface BoardRepository extends JpaRepository<Board, UUID> {
     @org.springframework.data.jpa.repository.Query("SELECT b FROM Board b WHERE (b.ownerId = :userId OR b.visibility = com.ishan.syncCanvas.board.entity.Visibility.PUBLIC) AND (LOWER(b.name) LIKE LOWER(CONCAT('%', :name, '%')) OR LOWER(CAST(b.id AS string)) LIKE LOWER(CONCAT('%', :name, '%')))")
     Page<Board> findAccessibleBoardsByName(@org.springframework.data.repository.query.Param("userId") UUID userId, @org.springframework.data.repository.query.Param("name") String name, Pageable pageable);
 
+    /**
+     * SELECT ... FOR UPDATE. Serializes sequence allocation for one board across every
+     * instance sharing the database; the lock is held only for the event-commit transaction.
+     */
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @org.springframework.data.jpa.repository.Query("SELECT b FROM Board b WHERE b.id = :id")
+    java.util.Optional<Board> findByIdForUpdate(@org.springframework.data.repository.query.Param("id") UUID id);
+
 }

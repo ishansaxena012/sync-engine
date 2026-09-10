@@ -33,27 +33,24 @@ public class DeleteObjectHandler
                                 + operation.boardId()));
 
         session.getLock().writeLock().lock();
-
         try {
-
-            if (operation.objectId() == null) {
-                throw new IllegalArgumentException("Object ID cannot be null");
-            }
-
-            boolean removed = session.removeObject(operation.objectId());
-
-            if (!removed) {
-                throw new ObjectNotFoundException(operation.objectId());
-            }
+            apply(operation, session, ApplyMode.LIVE);
             dirtySessionTracker.markDirty(operation.boardId());
-
-            log.debug(
-                    "Deleted object {} from board {}",
-                    operation.objectId(),
-                    operation.boardId());
-
         } finally {
             session.getLock().writeLock().unlock();
         }
+    }
+
+    @Override
+    public void apply(DeleteObjectOperation operation, BoardSession session, ApplyMode mode) {
+        if (operation.objectId() == null) {
+            throw new IllegalArgumentException("Object ID cannot be null");
+        }
+
+        if (!session.removeObject(operation.objectId())) {
+            throw new ObjectNotFoundException(operation.objectId());
+        }
+
+        log.debug("Deleted object {} from board {} ({})", operation.objectId(), operation.boardId(), mode);
     }
 }

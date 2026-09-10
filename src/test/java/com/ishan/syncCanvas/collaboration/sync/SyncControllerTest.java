@@ -24,7 +24,7 @@ import static org.mockito.Mockito.when;
 class SyncControllerTest {
 
     @Mock
-    private OperationSequenceService operationSequenceService;
+    private BoardSyncService boardSyncService;
     @Mock
     private BoardAccessGuard boardAccessGuard;
     @Mock
@@ -39,14 +39,14 @@ class SyncControllerTest {
 
     @BeforeEach
     void setUp() {
-        controller = new SyncController(operationSequenceService, boardAccessGuard, messagingTemplate);
+        controller = new SyncController(boardSyncService, boardAccessGuard, messagingTemplate);
     }
 
     @Test
     void authorizedUserReceivesSyncResponseOnPrivateQueue() {
         SyncResponse response = new SyncResponse(SyncStatus.UP_TO_DATE, boardId, 5L, List.of());
         when(boardAccessGuard.isAccessible(boardId, userId)).thenReturn(true);
-        when(operationSequenceService.buildSyncResponse(eq(boardId), any(SyncRequest.class))).thenReturn(response);
+        when(boardSyncService.sync(eq(boardId), any(SyncRequest.class))).thenReturn(response);
 
         controller.sync(boardId, new SyncRequest(5L), principal);
 
@@ -55,19 +55,18 @@ class SyncControllerTest {
     }
 
     @Test
-    void unauthorizedUserGetsNothingAndNoReplayIsComputed() {
+    void unauthorizedUserGetsNothingAndNoHistoryIsRead() {
         when(boardAccessGuard.isAccessible(boardId, userId)).thenReturn(false);
 
         controller.sync(boardId, new SyncRequest(5L), principal);
 
-        verifyNoInteractions(operationSequenceService, messagingTemplate);
+        verifyNoInteractions(boardSyncService, messagingTemplate);
     }
 
     @Test
     void identityComesFromPrincipalNotPayload() {
-        // SyncRequest carries only lastSequenceReceived — there is no user field to spoof.
         when(boardAccessGuard.isAccessible(boardId, userId)).thenReturn(true);
-        when(operationSequenceService.buildSyncResponse(eq(boardId), any(SyncRequest.class)))
+        when(boardSyncService.sync(eq(boardId), any(SyncRequest.class)))
                 .thenReturn(new SyncResponse(SyncStatus.UP_TO_DATE, boardId, 0L, List.of()));
 
         controller.sync(boardId, new SyncRequest(0L), principal);

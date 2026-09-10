@@ -5,6 +5,8 @@ import com.ishan.syncCanvas.board.entity.Visibility;
 import com.ishan.syncCanvas.board.repository.BoardRepository;
 import com.ishan.syncCanvas.board.service.impl.BoardServiceImpl;
 import com.ishan.syncCanvas.canvas.repository.CanvasObjectRepository;
+import com.ishan.syncCanvas.collaboration.event.BoardEventRepository;
+import com.ishan.syncCanvas.collaboration.event.BoardSnapshotRepository;
 import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
 import com.ishan.syncCanvas.collaboration.sync.OperationSequenceService;
@@ -39,6 +41,10 @@ class BoardDeletionCleanupTest {
     private DirtySessionTracker dirtySessionTracker;
     @Mock
     private OperationSequenceService operationSequenceService;
+    @Mock
+    private BoardEventRepository boardEventRepository;
+    @Mock
+    private BoardSnapshotRepository boardSnapshotRepository;
 
     @InjectMocks
     private BoardServiceImpl boardService;
@@ -51,15 +57,18 @@ class BoardDeletionCleanupTest {
     }
 
     @Test
-    void deleteClearsSequenceAndReplayStateAlongsideExistingCleanup() {
+    void deleteClearsEventsSnapshotsSequenceAndReplayStateAlongsideExistingCleanup() {
         when(boardRepository.findById(boardId)).thenReturn(Optional.of(board()));
 
         boardService.deleteBoard(ownerId, boardId);
 
+        verify(boardEventRepository).deleteByBoardId(boardId);
+        verify(boardSnapshotRepository).deleteByBoardId(boardId);
         verify(operationSequenceService).clearBoardState(boardId);
         verify(boardSessionManager).remove(boardId);
         verify(dirtySessionTracker).clearDirty(boardId);
         verify(canvasObjectRepository).deleteByBoardId(boardId);
+        verify(boardRepository).delete(org.mockito.ArgumentMatchers.any(Board.class));
     }
 
     @Test
@@ -69,6 +78,7 @@ class BoardDeletionCleanupTest {
         assertThatThrownBy(() -> boardService.deleteBoard(UUID.randomUUID(), boardId))
                 .isInstanceOf(AccessDeniedException.class);
 
-        verifyNoInteractions(operationSequenceService, canvasObjectRepository, boardSessionManager);
+        verifyNoInteractions(operationSequenceService, canvasObjectRepository, boardSessionManager,
+                boardEventRepository, boardSnapshotRepository);
     }
 }

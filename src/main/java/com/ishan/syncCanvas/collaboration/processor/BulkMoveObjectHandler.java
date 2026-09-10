@@ -30,7 +30,7 @@ public class BulkMoveObjectHandler implements OperationHandler<BulkMoveObjectOpe
 
     @Override
     public void handle(BulkMoveObjectOperation operation) {
-        log.info("Bulk move handler started");
+
         BoardSession session = sessionManager
                 .getSession(operation.boardId())
                 .orElseThrow(() -> new IllegalStateException(
@@ -38,52 +38,55 @@ public class BulkMoveObjectHandler implements OperationHandler<BulkMoveObjectOpe
 
         session.getLock().writeLock().lock();
         try {
-            if (operation.moves() == null || operation.moves().isEmpty()) {
-                throw new IllegalArgumentException("Moves cannot be null or empty");
-            }
-
-            // First pass: resolve and validate every move without mutating anything, so a
-            // failure partway through never leaves earlier objects in this batch half-applied.
-            List<CanvasObject> resolved = new ArrayList<>(operation.moves().size());
-
-            for (BulkMoveObjectOperation.ObjectMove move : operation.moves()) {
-                if (move.objectId() == null) {
-                    throw new IllegalArgumentException("Object ID cannot be null in bulk move");
-                }
-
-                CanvasObject object = session.getObject(move.objectId());
-                if (object == null) {
-                    throw new ObjectNotFoundException(move.objectId());
-                }
-
-                if (move.expectedVersion() != null && !Objects.equals(object.getVersion(), move.expectedVersion())) {
-                    throw new VersionMismatchException(move.expectedVersion(), object.getVersion());
-                }
-
-                resolved.add(object);
-            }
-
-            // Second pass: all moves validated, now apply them.
-            for (int i = 0; i < resolved.size(); i++) {
-                CanvasObject object = resolved.get(i);
-                BulkMoveObjectOperation.ObjectMove move = operation.moves().get(i);
-
-                object.setX(move.x());
-                object.setY(move.y());
-                object.setVersion(object.getVersion() != null ? object.getVersion() + 1 : 1L);
-
-                log.debug("Moved object {} to ({}, {}) on board {}", move.objectId(), move.x(), move.y(), operation.boardId());
-            }
-
-            session.incrementVersion();
-            session.touch();
-
+            apply(operation, session, ApplyMode.LIVE);
             dirtySessionTracker.markDirty(operation.boardId());
-
-            log.info("Successfully bulk moved {} objects on board {}", operation.moves().size(), operation.boardId());
-
         } finally {
             session.getLock().writeLock().unlock();
         }
+    }
+
+    @Override
+    public void apply(BulkMoveObjectOperation operation, BoardSession session, ApplyMode mode) {
+        if (operation.moves() == null || operation.moves().isEmpty()) {
+            throw new IllegalArgumentException("Moves cannot be null or empty");
+        }
+
+        // First pass: resolve and validate every move without mutating anything, so a
+        // failure partway through never leaves earlier objects in this batch half-applied.
+        List<CanvasObject> resolved = new ArrayList<>(operation.moves().size());
+
+        for (BulkMoveObjectOperation.ObjectMove move : operation.moves()) {
+            if (move.objectId() == null) {
+                throw new IllegalArgumentException("Object ID cannot be null in bulk move");
+            }
+
+            CanvasObject object = session.getObject(move.objectId());
+            if (object == null) {
+                throw new ObjectNotFoundException(move.objectId());
+            }
+
+            if (mode == ApplyMode.LIVE
+                    && move.expectedVersion() != null
+                    && !Objects.equals(object.getVersion(), move.expectedVersion())) {
+                throw new VersionMismatchException(move.expectedVersion(), object.getVersion());
+            }
+
+            resolved.add(object);
+        }
+
+        // Second pass: all moves validated, now apply them.
+        for (int i = 0; i < resolved.size(); i++) {
+            CanvasObject object = resolved.get(i);
+            BulkMoveObjectOperation.ObjectMove move = operation.moves().get(i);
+
+            object.setX(move.x());
+            object.setY(move.y());
+            object.setVersion(object.getVersion() != null ? object.getVersion() + 1 : 1L);
+        }
+
+        session.incrementVersion();
+        session.touch();
+
+        log.debug("Bulk moved {} objects on board {} ({})", operation.moves().size(), operation.boardId(), mode);
     }
 }

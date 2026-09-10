@@ -17,14 +17,10 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Redis-authoritative per-board operation sequencing and a bounded recent-operation
- * replay buffer for reconnect sync. Deliberately holds no JVM-local state — the
- * sequence counter and replay buffer are both Redis structures shared across every
- * SyncEngine instance, by design (see the "STRICTLY DO NOT USE AtomicLong/local state"
- * requirement this was built against).
- *
- * <p>This is a temporary recent-replay layer, not a durable event store — bounded by
- * both count and TTL, meant to cover a brief disconnect, not full history recovery.
+ * Redis recent-operation replay buffer plus a Redis mirror of each board's current
+ * sequence, for fast reconnect sync. Since Phase 8 neither is authoritative — the
+ * PostgreSQL event store is (see {@code BoardEventService}); this is the cache in
+ * front of it, bounded by both count and TTL. Holds no JVM-local state.
  */
 @Slf4j
 @Service
@@ -40,13 +36,12 @@ public class OperationSequenceService {
     @Value("${app.collaboration.replay-ttl-seconds:600}")
     private long replayTtlSeconds;
 
-    /** Assigns the next monotonically increasing sequence for this board. Never call twice for one operation. */
-    public long nextSequence(UUID boardId) {
-        Long sequence = redisTemplate.opsForValue().increment(sequenceKey(boardId));
-        return sequence == null ? 1L : sequence;
+    /** Mirrors a just-committed durable sequence into Redis. Best-effort cache write, called after commit. */
+    public void setCurrentSequence(UUID boardId, long sequence) {
+        redisTemplate.opsForValue().set(sequenceKey(boardId), Long.toString(sequence));
     }
 
-    /** Current sequence without incrementing — 0 if the board has never had an operation. */
+    /** Redis's view of the current sequence — 0 if unknown. Not authoritative; PostgreSQL is. */
     public long currentSequence(UUID boardId) {
         try {
             String raw = redisTemplate.opsForValue().get(sequenceKey(boardId));
@@ -58,10 +53,9 @@ public class OperationSequenceService {
     }
 
     /**
-     * Records an already-sequenced operation in the bounded replay buffer. Call this
-     * exactly once, from the instance that actually assigned the sequence — other
-     * instances receiving the same operation via Redis pub/sub must not call this
-     * again, since the buffer is shared and the entry is already there.
+     * Records an already-committed, already-sequenced operation in the bounded replay
+     * buffer. Call once, from the instance that committed it — relays via pub/sub must
+     * not write it again.
      */
     public void recordForReplay(UUID boardId, SequencedOperation sequencedOperation) {
         try {
@@ -79,21 +73,23 @@ public class OperationSequenceService {
         }
     }
 
-    /**
-     * Builds a reconnect-sync response. Never claims a gap-free replay unless the
-     * buffer's oldest retained entry actually starts at {@code lastSequenceReceived + 1}
-     * — if older history has already been evicted (by count or TTL), returns
-     * SYNC_REQUIRED instead of a silently-incomplete replay.
-     */
+    /** Redis-only sync using Redis's own view of the current sequence. Prefer the overload with an authoritative value. */
     public SyncResponse buildSyncResponse(UUID boardId, SyncRequest request) {
+        return buildSyncResponse(boardId, request, currentSequence(boardId));
+    }
+
+    /**
+     * Builds a reply from the Redis buffer alone. Never claims a gap-free replay unless
+     * the buffer's oldest retained entry actually starts at {@code lastSequenceReceived + 1};
+     * otherwise returns SYNC_REQUIRED so the caller can fall back to the durable log.
+     */
+    public SyncResponse buildSyncResponse(UUID boardId, SyncRequest request, long currentSequence) {
         long lastSequenceReceived = request == null || request.lastSequenceReceived() == null
                 ? 0L
                 : request.lastSequenceReceived();
 
-        long current = currentSequence(boardId);
-
-        if (lastSequenceReceived >= current) {
-            return new SyncResponse(SyncStatus.UP_TO_DATE, boardId, current, List.of());
+        if (lastSequenceReceived >= currentSequence) {
+            return new SyncResponse(SyncStatus.UP_TO_DATE, boardId, currentSequence, List.of());
         }
 
         String key = operationsKey(boardId);
@@ -102,17 +98,16 @@ public class OperationSequenceService {
             oldest = redisTemplate.opsForZSet().rangeWithScores(key, 0, 0);
         } catch (Exception ex) {
             log.error("Failed to read replay buffer floor for board {}", boardId, ex);
-            return new SyncResponse(SyncStatus.SYNC_REQUIRED, boardId, current, List.of());
+            return syncRequired(boardId, currentSequence);
         }
 
         if (oldest == null || oldest.isEmpty()) {
-            return new SyncResponse(SyncStatus.SYNC_REQUIRED, boardId, current, List.of());
+            return syncRequired(boardId, currentSequence);
         }
 
         double oldestAvailableSequence = oldest.iterator().next().getScore();
         if (oldestAvailableSequence > lastSequenceReceived + 1) {
-            // The client needs history that's already fallen out of the bounded buffer.
-            return new SyncResponse(SyncStatus.SYNC_REQUIRED, boardId, current, List.of());
+            return syncRequired(boardId, currentSequence);
         }
 
         Set<String> rawOperations;
@@ -120,7 +115,7 @@ public class OperationSequenceService {
             rawOperations = redisTemplate.opsForZSet().rangeByScore(key, lastSequenceReceived + 1, Double.MAX_VALUE);
         } catch (Exception ex) {
             log.error("Failed to read replay range for board {}", boardId, ex);
-            return new SyncResponse(SyncStatus.SYNC_REQUIRED, boardId, current, List.of());
+            return syncRequired(boardId, currentSequence);
         }
 
         List<SequencedOperation> operations = (rawOperations == null ? Set.<String>of() : rawOperations).stream()
@@ -129,13 +124,17 @@ public class OperationSequenceService {
                 .sorted(Comparator.comparingLong(SequencedOperation::sequence))
                 .toList();
 
-        return new SyncResponse(SyncStatus.OK, boardId, current, operations);
+        return new SyncResponse(SyncStatus.OK, boardId, currentSequence, operations);
     }
 
-    /** Removes this board's sequence counter and replay buffer — call on board deletion. */
+    /** Removes this board's sequence mirror and replay buffer — call on board deletion. */
     public void clearBoardState(UUID boardId) {
         redisTemplate.delete(sequenceKey(boardId));
         redisTemplate.delete(operationsKey(boardId));
+    }
+
+    private static SyncResponse syncRequired(UUID boardId, long currentSequence) {
+        return new SyncResponse(SyncStatus.SYNC_REQUIRED, boardId, currentSequence, List.of());
     }
 
     private SequencedOperation deserialize(String json) {

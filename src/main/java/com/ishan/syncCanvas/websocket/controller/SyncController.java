@@ -1,7 +1,7 @@
 package com.ishan.syncCanvas.websocket.controller;
 
 import com.ishan.syncCanvas.collaboration.service.BoardAccessGuard;
-import com.ishan.syncCanvas.collaboration.sync.OperationSequenceService;
+import com.ishan.syncCanvas.collaboration.sync.BoardSyncService;
 import com.ishan.syncCanvas.collaboration.sync.SyncRequest;
 import com.ishan.syncCanvas.collaboration.sync.SyncResponse;
 import com.ishan.syncCanvas.security.user.UserPrincipal;
@@ -37,7 +37,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class SyncController {
 
-    private final OperationSequenceService operationSequenceService;
+    private final BoardSyncService boardSyncService;
     private final BoardAccessGuard boardAccessGuard;
     private final SimpMessagingTemplate messagingTemplate;
 
@@ -52,12 +52,12 @@ public class SyncController {
         }
 
         // Same access rule as sending an operation — a user who can't see a board
-        // can't replay its history either.
+        // can't replay its history either, from Redis or from the durable log.
         if (!boardAccessGuard.isAccessible(boardId, user.getId())) {
             return;
         }
 
-        SyncResponse response = operationSequenceService.buildSyncResponse(boardId, request);
+        SyncResponse response = boardSyncService.sync(boardId, request);
 
         messagingTemplate.convertAndSendToUser(
                 user.getName(),
