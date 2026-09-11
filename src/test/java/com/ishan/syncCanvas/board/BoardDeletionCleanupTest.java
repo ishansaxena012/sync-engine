@@ -5,11 +5,15 @@ import com.ishan.syncCanvas.board.entity.Visibility;
 import com.ishan.syncCanvas.board.repository.BoardRepository;
 import com.ishan.syncCanvas.board.service.impl.BoardServiceImpl;
 import com.ishan.syncCanvas.canvas.repository.CanvasObjectRepository;
+import com.ishan.syncCanvas.collaboration.cursor.CursorService;
 import com.ishan.syncCanvas.collaboration.event.BoardEventRepository;
 import com.ishan.syncCanvas.collaboration.event.BoardSnapshotRepository;
 import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
+import com.ishan.syncCanvas.collaboration.presence.PresenceService;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
 import com.ishan.syncCanvas.collaboration.sync.OperationSequenceService;
+import com.ishan.syncCanvas.collaboration.undo.BoardUndoCursorRepository;
+import com.ishan.syncCanvas.collaboration.undo.BoardUndoStackEntryRepository;
 import com.ishan.syncCanvas.user.service.UserService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -45,6 +49,14 @@ class BoardDeletionCleanupTest {
     private BoardEventRepository boardEventRepository;
     @Mock
     private BoardSnapshotRepository boardSnapshotRepository;
+    @Mock
+    private BoardUndoStackEntryRepository boardUndoStackEntryRepository;
+    @Mock
+    private BoardUndoCursorRepository boardUndoCursorRepository;
+    @Mock
+    private PresenceService presenceService;
+    @Mock
+    private CursorService cursorService;
 
     @InjectMocks
     private BoardServiceImpl boardService;
@@ -64,7 +76,11 @@ class BoardDeletionCleanupTest {
 
         verify(boardEventRepository).deleteByBoardId(boardId);
         verify(boardSnapshotRepository).deleteByBoardId(boardId);
+        verify(boardUndoStackEntryRepository).deleteByBoardId(boardId);
+        verify(boardUndoCursorRepository).deleteByBoardId(boardId);
         verify(operationSequenceService).clearBoardState(boardId);
+        verify(presenceService).clearBoardState(boardId);
+        verify(cursorService).clearBoardState(boardId);
         verify(boardSessionManager).remove(boardId);
         verify(dirtySessionTracker).clearDirty(boardId);
         verify(canvasObjectRepository).deleteByBoardId(boardId);
@@ -79,6 +95,7 @@ class BoardDeletionCleanupTest {
                 .isInstanceOf(AccessDeniedException.class);
 
         verifyNoInteractions(operationSequenceService, canvasObjectRepository, boardSessionManager,
-                boardEventRepository, boardSnapshotRepository);
+                boardEventRepository, boardSnapshotRepository, boardUndoStackEntryRepository,
+                boardUndoCursorRepository, presenceService, cursorService);
     }
 }

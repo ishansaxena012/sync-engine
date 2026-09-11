@@ -2,6 +2,7 @@ package com.ishan.syncCanvas.collaboration.processor;
 
 import com.ishan.syncCanvas.collaboration.operation.Operation;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
+import com.ishan.syncCanvas.collaboration.undo.UndoableChange;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -32,7 +33,7 @@ public class OperationProcessor {
         });
     }
 
-    public void process(Operation operation) {
+    public UndoableChange process(Operation operation) {
 
         OperationHandler<? extends Operation> handler = registry.get(operation.getClass());
 
@@ -42,14 +43,15 @@ public class OperationProcessor {
                             + operation.getClass().getSimpleName());
         }
 
-        dispatch(handler, operation);
+        return dispatch(handler, operation);
     }
 
     /**
      * Applies an operation to an arbitrary session (e.g. a throwaway one during board
-     * reconstruction) without touching the live session registry or dirty tracking.
+     * reconstruction, or the live session during an undo/redo) without touching the live
+     * session registry or dirty tracking.
      */
-    public void apply(Operation operation, BoardSession session, ApplyMode mode) {
+    public UndoableChange apply(Operation operation, BoardSession session, ApplyMode mode) {
 
         OperationHandler<? extends Operation> handler = registry.get(operation.getClass());
 
@@ -59,22 +61,22 @@ public class OperationProcessor {
                             + operation.getClass().getSimpleName());
         }
 
-        dispatchApply(handler, operation, session, mode);
+        return dispatchApply(handler, operation, session, mode);
     }
 
     @SuppressWarnings("unchecked")
-    private <T extends Operation> void dispatch(
+    private <T extends Operation> UndoableChange dispatch(
             OperationHandler<? extends Operation> handler,
             Operation operation) {
-        ((OperationHandler<T>) handler).handle((T) operation);
+        return ((OperationHandler<T>) handler).handle((T) operation);
     }
 
     @SuppressWarnings("unchecked")
-    private <T extends Operation> void dispatchApply(
+    private <T extends Operation> UndoableChange dispatchApply(
             OperationHandler<? extends Operation> handler,
             Operation operation,
             BoardSession session,
             ApplyMode mode) {
-        ((OperationHandler<T>) handler).apply((T) operation, session, mode);
+        return ((OperationHandler<T>) handler).apply((T) operation, session, mode);
     }
 }

@@ -121,6 +121,26 @@ public class PresenceService {
         broadcast(boardId, PresenceEventType.USER_LEFT, userId, displayName, null);
     }
 
+    /**
+     * Removes every presence key for a board — the per-participant records, their
+     * connection counters, and the membership set — with no USER_LEFT broadcast, since
+     * this is only called when the board itself is being deleted.
+     */
+    public void clearBoardState(UUID boardId) {
+        try {
+            for (String memberId : getPresenceMembers(boardId)) {
+                UUID userId = parseUuid(memberId);
+                if (userId != null) {
+                    redisTemplate.delete(presenceKey(boardId, userId));
+                    redisTemplate.delete(connectionsKey(boardId, userId));
+                }
+            }
+            redisTemplate.delete(membersKey(boardId));
+        } catch (Exception ex) {
+            log.error("Failed to clear presence state for board {}", boardId, ex);
+        }
+    }
+
     /** Current live participants for a board, skipping any membership entry whose TTL already lapsed. */
     public List<PresenceEvent> getActiveParticipants(UUID boardId) {
         List<PresenceEvent> participants = new ArrayList<>();

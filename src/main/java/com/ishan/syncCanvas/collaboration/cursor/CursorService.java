@@ -83,6 +83,26 @@ public class CursorService {
         cursorEventBroadcaster.broadcast(boardId, leaveEvent);
     }
 
+    /**
+     * Removes every cursor key for a board — the per-user positions and the membership
+     * set — with no CURSOR_LEAVE broadcast, since this is only called when the board
+     * itself is being deleted.
+     */
+    public void clearBoardState(UUID boardId) {
+        try {
+            for (String memberId : getCursorMembers(boardId)) {
+                try {
+                    redisTemplate.delete(cursorKey(boardId, UUID.fromString(memberId)));
+                } catch (IllegalArgumentException ignored) {
+                    // Malformed member id already isn't a key we can clean up further.
+                }
+            }
+            redisTemplate.delete(membersKey(boardId));
+        } catch (Exception ex) {
+            log.error("Failed to clear cursor state for board {}", boardId, ex);
+        }
+    }
+
     /** Current live cursors for a board, skipping any membership entry whose TTL already lapsed. */
     public List<CursorEvent> getActiveCursors(UUID boardId) {
         List<CursorEvent> cursors = new ArrayList<>();

@@ -9,7 +9,9 @@ import org.springframework.stereotype.Component;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ishan.syncCanvas.collaboration.operation.Operation;
 import com.ishan.syncCanvas.collaboration.operation.SequencedOperation;
+import com.ishan.syncCanvas.collaboration.processor.ApplyMode;
 import com.ishan.syncCanvas.collaboration.processor.OperationProcessor;
+import com.ishan.syncCanvas.collaboration.session.BoardSession;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
 
 import lombok.RequiredArgsConstructor;
@@ -24,6 +26,16 @@ import lombok.extern.slf4j.Slf4j;
  * locally-submitted operations, so this instance's cache and future persistence stay
  * consistent. In all cases the operation is re-broadcast to this instance's own
  * WebSocket clients so cross-instance viewers see the update.
+ *
+ * <p>Applied with {@link ApplyMode#REPLAY}, not {@code LIVE}: this operation was already
+ * accepted and durably committed on the originating instance, so re-validating
+ * {@code expectedVersion} here would be wrong — cross-instance delivery ordering can
+ * legitimately make this instance's local cache momentarily stale relative to the
+ * version the operation was accepted against. Applying it as {@code LIVE} would throw a
+ * spurious {@code VersionMismatchException} on that mismatch, leaving this instance's
+ * local session permanently behind (never updated for that object) until the next full
+ * session eviction — and a subsequent local persist flush of that session would then
+ * overwrite the correct, already-committed database row with the stale in-memory value.
  */
 @Slf4j
 @Component
@@ -49,9 +61,11 @@ public class RedisOperationSubscriber implements MessageListener {
 
             Operation operation = envelope.operation();
 
-            if (sessionManager.exists(operation.boardId())) {
+            BoardSession session = sessionManager.getSession(operation.boardId()).orElse(null);
+            if (session != null) {
+                session.getLock().writeLock().lock();
                 try {
-                    operationProcessor.process(operation);
+                    operationProcessor.apply(operation, session, ApplyMode.REPLAY);
                 } catch (Exception ex) {
                     // The operation was already accepted and applied on the originating
                     // instance — this instance's local session state may now be behind,
@@ -60,6 +74,8 @@ public class RedisOperationSubscriber implements MessageListener {
                     // application failed.
                     log.error("Failed to apply operation {} from Redis to local session for board {}",
                             operation.operationId(), operation.boardId(), ex);
+                } finally {
+                    session.getLock().writeLock().unlock();
                 }
             }
 

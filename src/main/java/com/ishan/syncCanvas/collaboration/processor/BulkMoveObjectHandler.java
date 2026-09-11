@@ -7,6 +7,7 @@ import com.ishan.syncCanvas.collaboration.operation.BulkMoveObjectOperation;
 import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
+import com.ishan.syncCanvas.collaboration.undo.UndoableChange;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -29,7 +30,7 @@ public class BulkMoveObjectHandler implements OperationHandler<BulkMoveObjectOpe
     }
 
     @Override
-    public void handle(BulkMoveObjectOperation operation) {
+    public UndoableChange handle(BulkMoveObjectOperation operation) {
 
         BoardSession session = sessionManager
                 .getSession(operation.boardId())
@@ -38,15 +39,16 @@ public class BulkMoveObjectHandler implements OperationHandler<BulkMoveObjectOpe
 
         session.getLock().writeLock().lock();
         try {
-            apply(operation, session, ApplyMode.LIVE);
+            UndoableChange change = apply(operation, session, ApplyMode.LIVE);
             dirtySessionTracker.markDirty(operation.boardId());
+            return change;
         } finally {
             session.getLock().writeLock().unlock();
         }
     }
 
     @Override
-    public void apply(BulkMoveObjectOperation operation, BoardSession session, ApplyMode mode) {
+    public UndoableChange apply(BulkMoveObjectOperation operation, BoardSession session, ApplyMode mode) {
         if (operation.moves() == null || operation.moves().isEmpty()) {
             throw new IllegalArgumentException("Moves cannot be null or empty");
         }
@@ -74,19 +76,28 @@ public class BulkMoveObjectHandler implements OperationHandler<BulkMoveObjectOpe
             resolved.add(object);
         }
 
-        // Second pass: all moves validated, now apply them.
+        // Second pass: all moves validated, now apply them, capturing pre-move
+        // positions as we go so the whole batch can be undone atomically later.
+        List<UndoableChange.BulkMoveChange.SingleMove> changes = new ArrayList<>(resolved.size());
         for (int i = 0; i < resolved.size(); i++) {
             CanvasObject object = resolved.get(i);
             BulkMoveObjectOperation.ObjectMove move = operation.moves().get(i);
 
+            double oldX = object.getX();
+            double oldY = object.getY();
+
             object.setX(move.x());
             object.setY(move.y());
             object.setVersion(object.getVersion() != null ? object.getVersion() + 1 : 1L);
+
+            changes.add(new UndoableChange.BulkMoveChange.SingleMove(move.objectId(), oldX, oldY, move.x(), move.y()));
         }
 
         session.incrementVersion();
         session.touch();
 
         log.debug("Bulk moved {} objects on board {} ({})", operation.moves().size(), operation.boardId(), mode);
+
+        return new UndoableChange.BulkMoveChange(changes);
     }
 }

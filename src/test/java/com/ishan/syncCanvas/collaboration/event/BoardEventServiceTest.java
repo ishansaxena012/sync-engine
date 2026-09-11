@@ -11,6 +11,8 @@ import com.ishan.syncCanvas.collaboration.exception.BoardAccessDeniedException;
 import com.ishan.syncCanvas.collaboration.operation.MoveObjectOperation;
 import com.ishan.syncCanvas.collaboration.operation.Operation;
 import com.ishan.syncCanvas.collaboration.sync.OperationSequenceService;
+import com.ishan.syncCanvas.collaboration.undo.UndoHistoryService;
+import com.ishan.syncCanvas.collaboration.undo.UndoableChange;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -45,6 +47,8 @@ class BoardEventServiceTest {
     private BoardSnapshotService snapshotService;
     @Mock
     private OperationSequenceService operationSequenceService;
+    @Mock
+    private UndoHistoryService undoHistoryService;
 
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
     private BoardEventService service;
@@ -56,7 +60,12 @@ class BoardEventServiceTest {
     @BeforeEach
     void setUp() {
         service = new BoardEventService(boardRepository, eventRepository, canvasObjectRepository,
-                snapshotService, operationSequenceService, objectMapper);
+                snapshotService, operationSequenceService, undoHistoryService, objectMapper);
+        // Real JpaRepository.save returns the (possibly merged) entity passed in; the mock
+        // must do the same so commitEvent's returned BoardEvent is usable by callers/tests.
+        // lenient: a couple of tests never reach this call at all (rejected before any
+        // sequence is touched, or don't exercise commitEvent in the first place).
+        org.mockito.Mockito.lenient().when(eventRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     private Board boardAt(long sequence) {
@@ -76,15 +85,16 @@ class BoardEventServiceTest {
         when(boardRepository.findByIdForUpdate(boardId)).thenReturn(Optional.of(board));
         MoveObjectOperation op = move();
 
-        long sequence = service.commitEvent(boardId, op, userId);
+        BoardEvent committed = service.commitEvent(boardId, op, userId, null);
 
-        assertThat(sequence).isEqualTo(11L);
+        assertThat(committed.getSequence()).isEqualTo(11L);
         assertThat(board.getSequence()).isEqualTo(11L);
         verify(boardRepository).save(board);
 
         ArgumentCaptor<BoardEvent> captor = ArgumentCaptor.forClass(BoardEvent.class);
         verify(eventRepository).save(captor.capture());
         BoardEvent event = captor.getValue();
+        assertThat(event).isSameAs(committed);
         assertThat(event.getBoardId()).isEqualTo(boardId);
         assertThat(event.getSequence()).isEqualTo(11L);
         assertThat(event.getOperationId()).isEqualTo(op.operationId());
@@ -92,12 +102,27 @@ class BoardEventServiceTest {
         assertThat(event.getOperationType()).isEqualTo("MOVE_OBJECT");
         assertThat(event.getCreatedAt()).isNotNull();
         assertThat(event.getId()).isNotNull();
+        assertThat(event.getEventKind()).isEqualTo(EventKind.NORMAL_OPERATION);
+        assertThat(event.getSourceEventId()).isNull();
         // Payload is the complete operation and round-trips to an equal Operation.
         Operation restored = objectMapper.readValue(event.getPayload(), Operation.class);
         assertThat(restored).isEqualTo(op);
         // Sequence came from the row, not from anything the client sent — the
         // operation carries no sequence field at all.
         assertThat(event.getPayload()).doesNotContain("\"sequence\"");
+        verify(undoHistoryService, never()).recordNormalOperation(any(), any(), any(), any());
+    }
+
+    @Test
+    void commitEventWithAChangeRecordsItToTheAuthorsUndoHistory() {
+        Board board = boardAt(10L);
+        when(boardRepository.findByIdForUpdate(boardId)).thenReturn(Optional.of(board));
+        MoveObjectOperation op = move();
+        UndoableChange change = new UndoableChange.MoveChange(op.objectId(), 1, 2, op.x(), op.y());
+
+        BoardEvent event = service.commitEvent(boardId, op, userId, change);
+
+        verify(undoHistoryService).recordNormalOperation(boardId, userId, event, change);
     }
 
     @Test
@@ -108,10 +133,10 @@ class BoardEventServiceTest {
         when(boardRepository.findByIdForUpdate(boardId)).thenReturn(Optional.of(boardAt(10L)));
         when(boardRepository.findByIdForUpdate(otherBoardId)).thenReturn(Optional.of(other));
 
-        long a = service.commitEvent(boardId, move(), userId);
+        long a = service.commitEvent(boardId, move(), userId, null).getSequence();
         long b = service.commitEvent(otherBoardId,
                 new MoveObjectOperation(UUID.randomUUID(), otherBoardId, userId, Instant.now(),
-                        UUID.randomUUID(), null, 1, 1), userId);
+                        UUID.randomUUID(), null, 1, 1), userId, null).getSequence();
 
         assertThat(a).isEqualTo(11L);
         assertThat(b).isEqualTo(100L);
@@ -124,7 +149,7 @@ class BoardEventServiceTest {
         when(operationSequenceService.currentSequence(boardId)).thenReturn(0L);
         when(canvasObjectRepository.findByBoardId(boardId)).thenReturn(List.of());
 
-        long sequence = service.commitEvent(boardId, move(), userId);
+        long sequence = service.commitEvent(boardId, move(), userId, null).getSequence();
 
         assertThat(sequence).isEqualTo(1L);
         verify(snapshotService, never()).saveSnapshot(any(), anyLong(), anyList());
@@ -139,7 +164,7 @@ class BoardEventServiceTest {
         when(operationSequenceService.currentSequence(boardId)).thenReturn(250L);
         when(canvasObjectRepository.findByBoardId(boardId)).thenReturn(List.of(existing));
 
-        long sequence = service.commitEvent(boardId, move(), userId);
+        long sequence = service.commitEvent(boardId, move(), userId, null).getSequence();
 
         assertThat(sequence).isEqualTo(251L);
         verify(snapshotService).saveSnapshot(boardId, 250L, List.of(existing));
@@ -154,7 +179,7 @@ class BoardEventServiceTest {
         when(operationSequenceService.currentSequence(boardId)).thenReturn(0L);
         when(canvasObjectRepository.findByBoardId(boardId)).thenReturn(List.of(existing));
 
-        long sequence = service.commitEvent(boardId, move(), userId);
+        long sequence = service.commitEvent(boardId, move(), userId, null).getSequence();
 
         assertThat(sequence).isEqualTo(1L);
         verify(snapshotService).saveSnapshot(boardId, 0L, List.of(existing));
@@ -164,7 +189,7 @@ class BoardEventServiceTest {
     void missingBoardIsRejectedBeforeAnySequenceIsTouched() {
         when(boardRepository.findByIdForUpdate(boardId)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.commitEvent(boardId, move(), userId))
+        assertThatThrownBy(() -> service.commitEvent(boardId, move(), userId, null))
                 .isInstanceOf(BoardAccessDeniedException.class);
 
         verify(eventRepository, never()).save(any());

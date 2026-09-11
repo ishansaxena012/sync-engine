@@ -9,11 +9,15 @@ import com.ishan.syncCanvas.board.mapper.BoardMapper;
 import com.ishan.syncCanvas.board.repository.BoardRepository;
 import com.ishan.syncCanvas.board.service.BoardService;
 import com.ishan.syncCanvas.canvas.repository.CanvasObjectRepository;
+import com.ishan.syncCanvas.collaboration.cursor.CursorService;
 import com.ishan.syncCanvas.collaboration.event.BoardEventRepository;
 import com.ishan.syncCanvas.collaboration.event.BoardSnapshotRepository;
 import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
+import com.ishan.syncCanvas.collaboration.presence.PresenceService;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
 import com.ishan.syncCanvas.collaboration.sync.OperationSequenceService;
+import com.ishan.syncCanvas.collaboration.undo.BoardUndoCursorRepository;
+import com.ishan.syncCanvas.collaboration.undo.BoardUndoStackEntryRepository;
 import com.ishan.syncCanvas.common.exception.BoardNotFoundException;
 import com.ishan.syncCanvas.user.service.UserService;
 import com.ishan.syncCanvas.user.dto.UserProfileResponse;
@@ -41,6 +45,10 @@ public class BoardServiceImpl implements BoardService {
     private final OperationSequenceService operationSequenceService;
     private final BoardEventRepository boardEventRepository;
     private final BoardSnapshotRepository boardSnapshotRepository;
+    private final BoardUndoStackEntryRepository boardUndoStackEntryRepository;
+    private final BoardUndoCursorRepository boardUndoCursorRepository;
+    private final PresenceService presenceService;
+    private final CursorService cursorService;
 
     private BoardResponse mapToResponse(Board board) {
         UserProfileResponse owner = userService.getUserProfile(board.getOwnerId());
@@ -113,9 +121,13 @@ public class BoardServiceImpl implements BoardService {
         boardSessionManager.remove(id);
         dirtySessionTracker.clearDirty(id);
         operationSequenceService.clearBoardState(id);
+        presenceService.clearBoardState(id);
+        cursorService.clearBoardState(id);
 
         // Explicit deletes alongside the ON DELETE CASCADE foreign keys, so the durable
         // history is removed even on a schema where the cascade isn't present.
+        boardUndoStackEntryRepository.deleteByBoardId(id);
+        boardUndoCursorRepository.deleteByBoardId(id);
         boardEventRepository.deleteByBoardId(id);
         boardSnapshotRepository.deleteByBoardId(id);
         canvasObjectRepository.deleteByBoardId(id);

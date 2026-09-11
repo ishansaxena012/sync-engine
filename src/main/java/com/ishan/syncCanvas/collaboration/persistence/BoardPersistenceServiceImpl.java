@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
+import com.ishan.syncCanvas.collaboration.session.SessionState;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
@@ -35,6 +36,16 @@ public class BoardPersistenceServiceImpl implements BoardPersistenceService {
                 Set<UUID> deletedIds;
                 session.getLock().readLock().lock();
                 try {
+                        // The session may have been evicted (and closed) by a durable-commit
+                        // failure on another thread between this scheduler tick reading the
+                        // session out of the registry and acquiring this lock. That mutation
+                        // was never committed to PostgreSQL and must never be flushed here —
+                        // it would silently overwrite the correct, already-durable row with a
+                        // value PostgreSQL never accepted.
+                        if (session.getState() == SessionState.CLOSED) {
+                                log.debug("Skipping persist for board {}; session was evicted", session.getBoardId());
+                                return new PersistenceResult(session.getBoardId(), 0, Instant.now());
+                        }
                         copies = session.getObjects().stream()
                                         .map(CanvasObject::deepCopy)
                                         .collect(Collectors.toList());

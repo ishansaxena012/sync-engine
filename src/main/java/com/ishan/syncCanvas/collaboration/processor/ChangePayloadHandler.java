@@ -7,6 +7,7 @@ import com.ishan.syncCanvas.collaboration.operation.ChangePayloadOperation;
 import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
+import com.ishan.syncCanvas.collaboration.undo.UndoableChange;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -28,7 +29,7 @@ public class ChangePayloadHandler
     }
 
     @Override
-    public void handle(ChangePayloadOperation operation) {
+    public UndoableChange handle(ChangePayloadOperation operation) {
 
         BoardSession session = sessionManager
                 .getSession(operation.boardId())
@@ -38,15 +39,16 @@ public class ChangePayloadHandler
 
         session.getLock().writeLock().lock();
         try {
-            apply(operation, session, ApplyMode.LIVE);
+            UndoableChange change = apply(operation, session, ApplyMode.LIVE);
             dirtySessionTracker.markDirty(operation.boardId());
+            return change;
         } finally {
             session.getLock().writeLock().unlock();
         }
     }
 
     @Override
-    public void apply(ChangePayloadOperation operation, BoardSession session, ApplyMode mode) {
+    public UndoableChange apply(ChangePayloadOperation operation, BoardSession session, ApplyMode mode) {
         if (operation.objectId() == null) {
             throw new IllegalArgumentException("Object ID cannot be null");
         }
@@ -62,6 +64,8 @@ public class ChangePayloadHandler
             throw new VersionMismatchException(operation.expectedVersion(), object.getVersion());
         }
 
+        var oldPayload = object.getPayload();
+
         object.changePayload(operation.payload());
         object.setVersion(object.getVersion() != null ? object.getVersion() + 1 : 1L);
 
@@ -69,5 +73,7 @@ public class ChangePayloadHandler
         session.touch();
 
         log.debug("Updated payload of object {} on board {} ({})", operation.objectId(), operation.boardId(), mode);
+
+        return new UndoableChange.ChangePayloadChange(operation.objectId(), oldPayload, operation.payload());
     }
 }

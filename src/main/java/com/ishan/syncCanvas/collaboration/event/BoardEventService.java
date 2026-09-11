@@ -9,6 +9,8 @@ import com.ishan.syncCanvas.canvas.repository.CanvasObjectRepository;
 import com.ishan.syncCanvas.collaboration.exception.BoardAccessDeniedException;
 import com.ishan.syncCanvas.collaboration.operation.Operation;
 import com.ishan.syncCanvas.collaboration.sync.OperationSequenceService;
+import com.ishan.syncCanvas.collaboration.undo.UndoHistoryService;
+import com.ishan.syncCanvas.collaboration.undo.UndoableChange;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -33,17 +35,22 @@ public class BoardEventService {
     private final CanvasObjectRepository canvasObjectRepository;
     private final BoardSnapshotService snapshotService;
     private final OperationSequenceService operationSequenceService;
+    private final UndoHistoryService undoHistoryService;
     private final ObjectMapper objectMapper;
 
     /**
-     * Allocates the next sequence for the board and records the event, atomically.
+     * Allocates the next sequence for the board and records the event, atomically. Also
+     * appends the change to the author's undo stack, in the same transaction, if one is
+     * given — every current client operation type produces one; {@code null} is only for
+     * callers (tests, or any future non-undoable operation type) that have none.
      * Redis pub/sub and the replay buffer are deliberately NOT part of this transaction —
      * they run after commit and are best-effort.
      *
-     * @return the committed sequence
+     * @return the saved event, carrying the committed sequence and its own id (the latter
+     *         needed by undo/redo history to link a future undo back to this event)
      */
     @Transactional
-    public long commitEvent(UUID boardId, Operation operation, UUID userId) {
+    public BoardEvent commitEvent(UUID boardId, Operation operation, UUID userId, UndoableChange change) {
         Board board = boardRepository.findByIdForUpdate(boardId)
                 .orElseThrow(() -> new BoardAccessDeniedException("Board not found: " + boardId));
 
@@ -55,7 +62,7 @@ public class BoardEventService {
         board.setSequence(sequence);
         boardRepository.save(board);
 
-        eventRepository.save(BoardEvent.of(
+        BoardEvent event = eventRepository.save(BoardEvent.of(
                 boardId,
                 sequence,
                 operation.operationId(),
@@ -63,7 +70,40 @@ public class BoardEventService {
                 operation.type().name(),
                 serialize(operation)));
 
-        return sequence;
+        if (change != null) {
+            undoHistoryService.recordNormalOperation(boardId, userId, event, change);
+        }
+
+        return event;
+    }
+
+    /**
+     * Same row-locked sequence allocation as {@link #commitEvent}, for an event produced
+     * by an undo or redo rather than a client-submitted operation. Kept separate rather
+     * than overloading {@code commitEvent} so the ordinary path's signature — and every
+     * existing caller and test of it — is untouched.
+     *
+     * @return the saved event
+     */
+    @Transactional
+    public BoardEvent commitUndoRedoEvent(
+            UUID boardId, Operation operation, UUID userId, EventKind kind, UUID sourceEventId) {
+        Board board = boardRepository.findByIdForUpdate(boardId)
+                .orElseThrow(() -> new BoardAccessDeniedException("Board not found: " + boardId));
+
+        long sequence = board.getSequence() + 1;
+        board.setSequence(sequence);
+        boardRepository.save(board);
+
+        return eventRepository.save(BoardEvent.of(
+                boardId,
+                sequence,
+                operation.operationId(),
+                userId,
+                operation.type().name(),
+                serialize(operation),
+                kind,
+                sourceEventId));
     }
 
     /**

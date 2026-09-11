@@ -2,6 +2,8 @@ package com.ishan.syncCanvas.collaboration.event;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
@@ -53,8 +55,26 @@ public class BoardEvent {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    /** NORMAL_OPERATION, UNDO_OPERATION, or REDO_OPERATION — see {@link EventKind}. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "event_kind", nullable = false, updatable = false, length = 20)
+    private EventKind eventKind;
+
+    /**
+     * For an UNDO_OPERATION, the event it undoes; for a REDO_OPERATION, the
+     * UNDO_OPERATION it redoes. Null for a NORMAL_OPERATION.
+     */
+    @Column(name = "source_event_id", updatable = false)
+    private UUID sourceEventId;
+
     public static BoardEvent of(UUID boardId, long sequence, UUID operationId, UUID userId,
                                 String operationType, String payload) {
+        return of(boardId, sequence, operationId, userId, operationType, payload,
+                EventKind.NORMAL_OPERATION, null);
+    }
+
+    public static BoardEvent of(UUID boardId, long sequence, UUID operationId, UUID userId,
+                                String operationType, String payload, EventKind eventKind, UUID sourceEventId) {
         BoardEvent event = new BoardEvent();
         event.id = UUID.randomUUID();
         event.boardId = boardId;
@@ -64,6 +84,8 @@ public class BoardEvent {
         event.operationType = operationType;
         event.payload = payload;
         event.createdAt = Instant.now();
+        event.eventKind = eventKind;
+        event.sourceEventId = sourceEventId;
         return event;
     }
 }

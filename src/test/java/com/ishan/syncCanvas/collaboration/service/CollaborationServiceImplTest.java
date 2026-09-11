@@ -1,5 +1,6 @@
 package com.ishan.syncCanvas.collaboration.service;
 
+import com.ishan.syncCanvas.collaboration.event.BoardEvent;
 import com.ishan.syncCanvas.collaboration.event.BoardEventService;
 import com.ishan.syncCanvas.collaboration.exception.BoardAccessDeniedException;
 import com.ishan.syncCanvas.collaboration.exception.VersionMismatchException;
@@ -78,14 +79,15 @@ class CollaborationServiceImplTest {
     void acceptedOperationIsAppliedThenCommittedThenReplayedThenPublishedThenBroadcast() {
         MoveObjectOperation op = operation();
         when(operationIdempotencyFilter.registerIfNew(op.operationId())).thenReturn(true);
-        when(boardEventService.commitEvent(boardId, op, userId)).thenReturn(42L);
+        BoardEvent event = BoardEvent.of(boardId, 42L, op.operationId(), userId, op.type().name(), "{}");
+        when(boardEventService.commitEvent(boardId, op, userId, null)).thenReturn(event);
 
         service.processOperation(boardId, op, userId);
 
         InOrder inOrder = inOrder(operationProcessor, boardEventService, operationSequenceService,
                 operationPublisher, redisOperationBroadcaster);
         inOrder.verify(operationProcessor).process(op);
-        inOrder.verify(boardEventService).commitEvent(boardId, op, userId);
+        inOrder.verify(boardEventService).commitEvent(boardId, op, userId, null);
         inOrder.verify(operationSequenceService).recordForReplay(
                 eq(boardId), argThat((SequencedOperation s) -> s.sequence() == 42L && s.operation() == op));
         inOrder.verify(operationSequenceService).setCurrentSequence(boardId, 42L);
@@ -99,7 +101,7 @@ class CollaborationServiceImplTest {
     void databaseFailureEvictsSessionPublishesNothingAndReportsError() {
         MoveObjectOperation op = operation();
         when(operationIdempotencyFilter.registerIfNew(op.operationId())).thenReturn(true);
-        when(boardEventService.commitEvent(boardId, op, userId)).thenThrow(new RuntimeException("db down"));
+        when(boardEventService.commitEvent(boardId, op, userId, null)).thenThrow(new RuntimeException("db down"));
 
         service.processOperation(boardId, op, userId);
 
@@ -117,7 +119,7 @@ class CollaborationServiceImplTest {
     void alreadyCommittedDuplicateIsDroppedQuietlyAndKeepsIdempotencyRegistration() {
         MoveObjectOperation op = operation();
         when(operationIdempotencyFilter.registerIfNew(op.operationId())).thenReturn(true);
-        when(boardEventService.commitEvent(boardId, op, userId))
+        when(boardEventService.commitEvent(boardId, op, userId, null))
                 .thenThrow(new DataIntegrityViolationException("uk_board_event_board_operation"));
 
         service.processOperation(boardId, op, userId);
@@ -133,7 +135,8 @@ class CollaborationServiceImplTest {
     void redisFailureAfterCommitDoesNotRollBackOrBlockDelivery() {
         MoveObjectOperation op = operation();
         when(operationIdempotencyFilter.registerIfNew(op.operationId())).thenReturn(true);
-        when(boardEventService.commitEvent(boardId, op, userId)).thenReturn(7L);
+        BoardEvent event = BoardEvent.of(boardId, 7L, op.operationId(), userId, op.type().name(), "{}");
+        when(boardEventService.commitEvent(boardId, op, userId, null)).thenReturn(event);
         doThrow(new RuntimeException("redis down")).when(operationSequenceService).recordForReplay(any(), any());
 
         service.processOperation(boardId, op, userId);

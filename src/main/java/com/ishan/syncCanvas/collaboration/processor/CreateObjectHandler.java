@@ -6,6 +6,8 @@ import com.ishan.syncCanvas.collaboration.operation.CreateObjectOperation;
 import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
+import com.ishan.syncCanvas.collaboration.undo.CanvasObjectSnapshot;
+import com.ishan.syncCanvas.collaboration.undo.UndoableChange;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -28,7 +30,7 @@ public class CreateObjectHandler
     }
 
     @Override
-    public void handle(CreateObjectOperation operation) {
+    public UndoableChange handle(CreateObjectOperation operation) {
 
         BoardSession session = sessionManager
                 .getSession(operation.boardId())
@@ -38,15 +40,16 @@ public class CreateObjectHandler
 
         session.getLock().writeLock().lock();
         try {
-            apply(operation, session, ApplyMode.LIVE);
+            UndoableChange change = apply(operation, session, ApplyMode.LIVE);
             dirtySessionTracker.markDirty(operation.boardId());
+            return change;
         } finally {
             session.getLock().writeLock().unlock();
         }
     }
 
     @Override
-    public void apply(CreateObjectOperation operation, BoardSession session, ApplyMode mode) {
+    public UndoableChange apply(CreateObjectOperation operation, BoardSession session, ApplyMode mode) {
         CreateCanvasObjectRequest request = operation.canvasObject();
         if (request == null) {
             throw new IllegalArgumentException("Create object request cannot be null");
@@ -79,5 +82,7 @@ public class CreateObjectHandler
         session.addObject(object);
 
         log.debug("Canvas object {} created on board {} ({})", object.getId(), operation.boardId(), mode);
+
+        return new UndoableChange.CreateChange(CanvasObjectSnapshot.of(object));
     }
 }

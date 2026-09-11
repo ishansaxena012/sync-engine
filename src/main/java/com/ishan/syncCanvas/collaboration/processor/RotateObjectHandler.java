@@ -7,6 +7,7 @@ import com.ishan.syncCanvas.collaboration.operation.RotateObjectOperation;
 import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
+import com.ishan.syncCanvas.collaboration.undo.UndoableChange;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -28,7 +29,7 @@ public class RotateObjectHandler
     }
 
     @Override
-    public void handle(RotateObjectOperation operation) {
+    public UndoableChange handle(RotateObjectOperation operation) {
 
         BoardSession session = sessionManager
                 .getSession(operation.boardId())
@@ -38,15 +39,16 @@ public class RotateObjectHandler
 
         session.getLock().writeLock().lock();
         try {
-            apply(operation, session, ApplyMode.LIVE);
+            UndoableChange change = apply(operation, session, ApplyMode.LIVE);
             dirtySessionTracker.markDirty(operation.boardId());
+            return change;
         } finally {
             session.getLock().writeLock().unlock();
         }
     }
 
     @Override
-    public void apply(RotateObjectOperation operation, BoardSession session, ApplyMode mode) {
+    public UndoableChange apply(RotateObjectOperation operation, BoardSession session, ApplyMode mode) {
         if (operation.objectId() == null) {
             throw new IllegalArgumentException("Object ID cannot be null");
         }
@@ -62,6 +64,8 @@ public class RotateObjectHandler
             throw new VersionMismatchException(operation.expectedVersion(), object.getVersion());
         }
 
+        double oldRotation = object.getRotation();
+
         object.setRotation(operation.rotation());
         object.setVersion(object.getVersion() != null ? object.getVersion() + 1 : 1L);
 
@@ -70,5 +74,7 @@ public class RotateObjectHandler
 
         log.debug("Rotated object {} to {} on board {} ({})",
                 operation.objectId(), operation.rotation(), operation.boardId(), mode);
+
+        return new UndoableChange.RotateChange(operation.objectId(), oldRotation, operation.rotation());
     }
 }

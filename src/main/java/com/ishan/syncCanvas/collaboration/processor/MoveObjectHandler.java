@@ -7,6 +7,7 @@ import com.ishan.syncCanvas.collaboration.operation.MoveObjectOperation;
 import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
+import com.ishan.syncCanvas.collaboration.undo.UndoableChange;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -29,7 +30,7 @@ public class MoveObjectHandler
     }
 
     @Override
-    public void handle(MoveObjectOperation operation) {
+    public UndoableChange handle(MoveObjectOperation operation) {
 
         BoardSession session = sessionManager
                 .getSession(operation.boardId())
@@ -39,15 +40,16 @@ public class MoveObjectHandler
 
         session.getLock().writeLock().lock();
         try {
-            apply(operation, session, ApplyMode.LIVE);
+            UndoableChange change = apply(operation, session, ApplyMode.LIVE);
             dirtySessionTracker.markDirty(operation.boardId());
+            return change;
         } finally {
             session.getLock().writeLock().unlock();
         }
     }
 
     @Override
-    public void apply(MoveObjectOperation operation, BoardSession session, ApplyMode mode) {
+    public UndoableChange apply(MoveObjectOperation operation, BoardSession session, ApplyMode mode) {
         if (operation.objectId() == null) {
             throw new IllegalArgumentException("Object ID cannot be null");
         }
@@ -63,6 +65,9 @@ public class MoveObjectHandler
             throw new VersionMismatchException(operation.expectedVersion(), object.getVersion());
         }
 
+        double oldX = object.getX();
+        double oldY = object.getY();
+
         object.setX(operation.x());
         object.setY(operation.y());
         object.setVersion(object.getVersion() != null ? object.getVersion() + 1 : 1L);
@@ -72,5 +77,7 @@ public class MoveObjectHandler
 
         log.debug("Moved object {} to ({}, {}) on board {} ({})",
                 operation.objectId(), operation.x(), operation.y(), operation.boardId(), mode);
+
+        return new UndoableChange.MoveChange(operation.objectId(), oldX, oldY, operation.x(), operation.y());
     }
 }

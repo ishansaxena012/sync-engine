@@ -21,6 +21,7 @@ import com.ishan.syncCanvas.collaboration.publisher.RedisOperationBroadcaster;
 import com.ishan.syncCanvas.collaboration.session.BoardSession;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionService;
 import com.ishan.syncCanvas.collaboration.sync.OperationSequenceService;
+import com.ishan.syncCanvas.collaboration.undo.UndoableChange;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -79,9 +80,9 @@ public class CollaborationServiceImpl
                         // order, and publish order are all the same order.
                         session.getLock().writeLock().lock();
                         try {
-                                operationProcessor.process(operation);
+                                UndoableChange change = operationProcessor.process(operation);
 
-                                OptionalLong sequence = commitDurably(boardId, operation, authenticatedUserId);
+                                OptionalLong sequence = commitDurably(boardId, operation, authenticatedUserId, change);
                                 if (sequence.isEmpty()) {
                                         return; // already durable from an earlier delivery; nothing more to do
                                 }
@@ -131,9 +132,9 @@ public class CollaborationServiceImpl
          *         operationId is already durably committed (a redelivery that slipped past
          *         the Redis idempotency window), in which case it is silently dropped.
          */
-        private OptionalLong commitDurably(UUID boardId, Operation operation, UUID userId) {
+        private OptionalLong commitDurably(UUID boardId, Operation operation, UUID userId, UndoableChange change) {
                 try {
-                        return OptionalLong.of(boardEventService.commitEvent(boardId, operation, userId));
+                        return OptionalLong.of(boardEventService.commitEvent(boardId, operation, userId, change).getSequence());
                 } catch (DataIntegrityViolationException alreadyCommitted) {
                         // Only the (board_id, operation_id) constraint can fire here — the
                         // row-locked allocation makes a (board_id, sequence) collision impossible.
@@ -147,7 +148,19 @@ public class CollaborationServiceImpl
                 }
         }
 
+        /**
+         * Discards the in-memory session after a durable-commit failure — the operation was
+         * already applied to it, and that uncommitted mutation must never reach current-state
+         * persistence. Marking the session {@code CLOSED} (in addition to removing it from the
+         * registry) closes a narrow race: a persistence-scheduler tick that already read this
+         * exact session reference out of the registry before this eviction runs is still
+         * blocked on the session's write lock (held by the caller for the whole
+         * apply+commit+distribute sequence) and only proceeds after this method returns and
+         * the lock is released — by then the CLOSED state tells it to skip the flush instead
+         * of persisting the never-committed mutation.
+         */
         private void evictSession(UUID boardId) {
+                boardSessionService.findSession(boardId).ifPresent(BoardSession::close);
                 boardSessionService.closeSession(boardId);
                 dirtySessionTracker.clearDirty(boardId);
         }
