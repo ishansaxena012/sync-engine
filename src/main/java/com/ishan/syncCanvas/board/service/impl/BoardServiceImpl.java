@@ -12,6 +12,8 @@ import com.ishan.syncCanvas.canvas.repository.CanvasObjectRepository;
 import com.ishan.syncCanvas.collaboration.cursor.CursorService;
 import com.ishan.syncCanvas.collaboration.event.BoardEventRepository;
 import com.ishan.syncCanvas.collaboration.event.BoardSnapshotRepository;
+import com.ishan.syncCanvas.collaboration.lifecycle.BoardClosedEvent;
+import com.ishan.syncCanvas.collaboration.lifecycle.BoardClosureBroadcaster;
 import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
 import com.ishan.syncCanvas.collaboration.presence.PresenceService;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
@@ -23,8 +25,11 @@ import com.ishan.syncCanvas.user.service.UserService;
 import com.ishan.syncCanvas.user.dto.UserProfileResponse;
 // import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.slf4j.Logger;
@@ -49,6 +54,8 @@ public class BoardServiceImpl implements BoardService {
     private final BoardUndoCursorRepository boardUndoCursorRepository;
     private final PresenceService presenceService;
     private final CursorService cursorService;
+    private final BoardClosureBroadcaster boardClosureBroadcaster;
+    private final SimpMessagingTemplate messagingTemplate;
 
     private BoardResponse mapToResponse(Board board) {
         UserProfileResponse owner = userService.getUserProfile(board.getOwnerId());
@@ -132,6 +139,26 @@ public class BoardServiceImpl implements BoardService {
         boardSnapshotRepository.deleteByBoardId(id);
         canvasObjectRepository.deleteByBoardId(id);
         boardRepository.delete(board);
+
+        // Only notify connected clients once the delete has actually committed — if this
+        // transaction rolls back, the board is still there and nothing should tell anyone
+        // otherwise. Local WebSocket delivery plus a Redis relay for other instances'
+        // clients, same split as every other collaboration broadcast.
+        Runnable notify = () -> {
+            BoardClosedEvent event = BoardClosedEvent.of(id);
+            messagingTemplate.convertAndSend("/topic/boards/" + id + "/closed", event);
+            boardClosureBroadcaster.broadcast(event);
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    notify.run();
+                }
+            });
+        } else {
+            notify.run();
+        }
     }
 
     @Override

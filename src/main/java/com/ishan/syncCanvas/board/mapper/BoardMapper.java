@@ -18,6 +18,7 @@ public class BoardMapper {
                 .visibility(board.getVisibility())
                 .createdAt(board.getCreatedAt())
                 .updatedAt(board.getUpdatedAt())
+                .sequence(board.getSequence())
                 .build();
     }
 }

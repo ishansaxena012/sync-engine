@@ -19,4 +19,7 @@ public class BoardResponse {
     private Visibility visibility;
     private Instant createdAt;
     private Instant updatedAt;
+    /** Current authoritative sequence — the anchor a client needs to request only the
+     *  operations it's missing on reconnect, instead of re-fetching every object. */
+    private long sequence;
 }

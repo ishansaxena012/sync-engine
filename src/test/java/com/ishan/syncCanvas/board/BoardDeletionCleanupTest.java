@@ -8,6 +8,8 @@ import com.ishan.syncCanvas.canvas.repository.CanvasObjectRepository;
 import com.ishan.syncCanvas.collaboration.cursor.CursorService;
 import com.ishan.syncCanvas.collaboration.event.BoardEventRepository;
 import com.ishan.syncCanvas.collaboration.event.BoardSnapshotRepository;
+import com.ishan.syncCanvas.collaboration.lifecycle.BoardClosedEvent;
+import com.ishan.syncCanvas.collaboration.lifecycle.BoardClosureBroadcaster;
 import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
 import com.ishan.syncCanvas.collaboration.presence.PresenceService;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
@@ -17,14 +19,17 @@ import com.ishan.syncCanvas.collaboration.undo.BoardUndoStackEntryRepository;
 import com.ishan.syncCanvas.user.service.UserService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.access.AccessDeniedException;
 
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -57,6 +62,10 @@ class BoardDeletionCleanupTest {
     private PresenceService presenceService;
     @Mock
     private CursorService cursorService;
+    @Mock
+    private BoardClosureBroadcaster boardClosureBroadcaster;
+    @Mock
+    private SimpMessagingTemplate messagingTemplate;
 
     @InjectMocks
     private BoardServiceImpl boardService;
@@ -85,6 +94,13 @@ class BoardDeletionCleanupTest {
         verify(dirtySessionTracker).clearDirty(boardId);
         verify(canvasObjectRepository).deleteByBoardId(boardId);
         verify(boardRepository).delete(org.mockito.ArgumentMatchers.any(Board.class));
+
+        // No Spring transaction is active in this plain unit test, so the notification
+        // fires immediately rather than deferred to afterCommit — see BoardServiceImpl.
+        ArgumentCaptor<BoardClosedEvent> captor = ArgumentCaptor.forClass(BoardClosedEvent.class);
+        verify(messagingTemplate).convertAndSend(org.mockito.ArgumentMatchers.eq("/topic/boards/" + boardId + "/closed"), captor.capture());
+        assertThat(captor.getValue().boardId()).isEqualTo(boardId);
+        verify(boardClosureBroadcaster).broadcast(captor.getValue());
     }
 
     @Test
@@ -96,6 +112,7 @@ class BoardDeletionCleanupTest {
 
         verifyNoInteractions(operationSequenceService, canvasObjectRepository, boardSessionManager,
                 boardEventRepository, boardSnapshotRepository, boardUndoStackEntryRepository,
-                boardUndoCursorRepository, presenceService, cursorService);
+                boardUndoCursorRepository, presenceService, cursorService, boardClosureBroadcaster,
+                messagingTemplate);
     }
 }
