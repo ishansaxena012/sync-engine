@@ -5,6 +5,7 @@ import com.ishan.syncCanvas.board.entity.Visibility;
 import com.ishan.syncCanvas.board.repository.BoardRepository;
 import com.ishan.syncCanvas.board.service.impl.BoardServiceImpl;
 import com.ishan.syncCanvas.canvas.repository.CanvasObjectRepository;
+import com.ishan.syncCanvas.chat.repository.ChatMessageRepository;
 import com.ishan.syncCanvas.collaboration.cursor.CursorService;
 import com.ishan.syncCanvas.collaboration.event.BoardEventRepository;
 import com.ishan.syncCanvas.collaboration.event.BoardSnapshotRepository;
@@ -44,6 +45,8 @@ class BoardDeletionCleanupTest {
     private UserService userService;
     @Mock
     private CanvasObjectRepository canvasObjectRepository;
+    @Mock
+    private ChatMessageRepository chatMessageRepository;
     @Mock
     private BoardSessionManager boardSessionManager;
     @Mock
@@ -93,6 +96,7 @@ class BoardDeletionCleanupTest {
         verify(boardSessionManager).remove(boardId);
         verify(dirtySessionTracker).clearDirty(boardId);
         verify(canvasObjectRepository).deleteByBoardId(boardId);
+        verify(chatMessageRepository).deleteByBoardId(boardId);
         verify(boardRepository).delete(org.mockito.ArgumentMatchers.any(Board.class));
 
         // No Spring transaction is active in this plain unit test, so the notification
@@ -113,6 +117,6 @@ class BoardDeletionCleanupTest {
         verifyNoInteractions(operationSequenceService, canvasObjectRepository, boardSessionManager,
                 boardEventRepository, boardSnapshotRepository, boardUndoStackEntryRepository,
                 boardUndoCursorRepository, presenceService, cursorService, boardClosureBroadcaster,
-                messagingTemplate);
+                messagingTemplate, chatMessageRepository);
     }
 }

@@ -9,6 +9,7 @@ import com.ishan.syncCanvas.board.mapper.BoardMapper;
 import com.ishan.syncCanvas.board.repository.BoardRepository;
 import com.ishan.syncCanvas.board.service.BoardService;
 import com.ishan.syncCanvas.canvas.repository.CanvasObjectRepository;
+import com.ishan.syncCanvas.chat.repository.ChatMessageRepository;
 import com.ishan.syncCanvas.collaboration.cursor.CursorService;
 import com.ishan.syncCanvas.collaboration.event.BoardEventRepository;
 import com.ishan.syncCanvas.collaboration.event.BoardSnapshotRepository;
@@ -45,6 +46,7 @@ public class BoardServiceImpl implements BoardService {
     private final BoardRepository boardRepository;
     private final UserService userService;
     private final CanvasObjectRepository canvasObjectRepository;
+    private final ChatMessageRepository chatMessageRepository;
     private final BoardSessionManager boardSessionManager;
     private final DirtySessionTracker dirtySessionTracker;
     private final OperationSequenceService operationSequenceService;
@@ -138,6 +140,7 @@ public class BoardServiceImpl implements BoardService {
         boardEventRepository.deleteByBoardId(id);
         boardSnapshotRepository.deleteByBoardId(id);
         canvasObjectRepository.deleteByBoardId(id);
+        chatMessageRepository.deleteByBoardId(id);
         boardRepository.delete(board);
 
         // Only notify connected clients once the delete has actually committed — if this
