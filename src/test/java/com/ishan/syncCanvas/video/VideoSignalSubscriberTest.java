@@ -51,8 +51,8 @@ class VideoSignalSubscriberTest {
 
     private VideoSignalMessage offerMessage() {
         return new VideoSignalMessage(
-                VideoSignalType.OFFER, boardId, UUID.randomUUID(), "Ishan",
-                objectMapper.createObjectNode().put("sdp", "v=0..."), System.currentTimeMillis());
+                VideoSignalType.OFFER, UUID.randomUUID(),
+                objectMapper.createObjectNode().put("sdp", "v=0..."), null, System.currentTimeMillis());
     }
 
     private void deliver(VideoSignalEnvelope envelope) throws Exception {
@@ -64,7 +64,7 @@ class VideoSignalSubscriberTest {
     void signalFromAnotherInstanceIsDeliveredToTheLocalTargetOnly() throws Exception {
         VideoSignalMessage message = offerMessage();
 
-        deliver(new VideoSignalEnvelope(UUID.randomUUID().toString(), targetUserId, message));
+        deliver(new VideoSignalEnvelope(UUID.randomUUID().toString(), boardId, targetUserId, message));
 
         verify(messagingTemplate).convertAndSendToUser(
                 targetUserId.toString(), "/queue/boards/" + boardId + "/video/signal", message);
@@ -72,7 +72,7 @@ class VideoSignalSubscriberTest {
 
     @Test
     void ourOwnRelayIsDroppedSoTheTargetDoesNotReceiveItTwice() throws Exception {
-        deliver(new VideoSignalEnvelope(ownInstanceId, targetUserId, offerMessage()));
+        deliver(new VideoSignalEnvelope(ownInstanceId, boardId, targetUserId, offerMessage()));
 
         verifyNoInteractions(messagingTemplate);
     }

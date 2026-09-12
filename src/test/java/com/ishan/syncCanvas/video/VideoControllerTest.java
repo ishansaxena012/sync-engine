@@ -1,12 +1,16 @@
 package com.ishan.syncCanvas.video;
 
-import com.ishan.syncCanvas.collaboration.dto.OperationErrorResponse;
 import com.ishan.syncCanvas.collaboration.exception.BoardAccessDeniedException;
 import com.ishan.syncCanvas.security.user.UserPrincipal;
 import com.ishan.syncCanvas.user.entity.User;
 import com.ishan.syncCanvas.video.controller.VideoController;
+import com.ishan.syncCanvas.video.dto.VideoErrorResponse;
 import com.ishan.syncCanvas.video.dto.VideoSignalRequest;
+import com.ishan.syncCanvas.video.dto.VideoStateRequest;
 import com.ishan.syncCanvas.video.exception.VideoRoomAccessDeniedException;
+import com.ishan.syncCanvas.video.exception.VideoRoomFullException;
+import com.ishan.syncCanvas.video.exception.VideoRoomNotFoundException;
+import com.ishan.syncCanvas.video.exception.VideoSignalRejectedException;
 import com.ishan.syncCanvas.video.service.VideoRoomService;
 import com.ishan.syncCanvas.video.service.VideoSessionTracker;
 import com.ishan.syncCanvas.video.service.VideoSignalService;
@@ -99,7 +103,7 @@ class VideoControllerTest {
     @Test
     void signalDelegatesToTheSignalServiceWithTheAuthenticatedSender() {
         VideoSignalRequest request = new VideoSignalRequest(
-                com.ishan.syncCanvas.video.dto.VideoSignalType.OFFER, UUID.randomUUID(), "session-1", null);
+                com.ishan.syncCanvas.video.dto.VideoSignalType.OFFER, UUID.randomUUID(), null, null, "session-1");
 
         controller().signal(boardId, request, principal);
 
@@ -111,12 +115,32 @@ class VideoControllerTest {
         Principal anonymous = () -> "someone";
         VideoController controller = controller();
         VideoSignalRequest request = new VideoSignalRequest(
-                com.ishan.syncCanvas.video.dto.VideoSignalType.OFFER, UUID.randomUUID(), "session-1", null);
+                com.ishan.syncCanvas.video.dto.VideoSignalType.OFFER, UUID.randomUUID(), null, null, "session-1");
 
         assertThatThrownBy(() -> controller.signal(boardId, request, anonymous))
                 .isInstanceOf(IllegalStateException.class);
 
         verifyNoInteractions(videoSignalService);
+    }
+
+    @Test
+    void updateStateDelegatesToTheRoomServiceWithTheAuthenticatedSender() {
+        VideoStateRequest request = new VideoStateRequest(false, true);
+
+        controller().updateState(boardId, request, principal);
+
+        verify(videoRoomService).updateParticipantState(boardId, principal, false, true);
+    }
+
+    @Test
+    void unauthenticatedUpdateStateIsRejectedWithoutReachingTheService() {
+        Principal anonymous = () -> "someone";
+        VideoController controller = controller();
+
+        assertThatThrownBy(() -> controller.updateState(boardId, new VideoStateRequest(true, true), anonymous))
+                .isInstanceOf(IllegalStateException.class);
+
+        verifyNoInteractions(videoRoomService);
     }
 
     @Test
@@ -180,10 +204,10 @@ class VideoControllerTest {
         controller().handleException(
                 new BoardAccessDeniedException("no access"), boardId, principal);
 
-        ArgumentCaptor<OperationErrorResponse> error = ArgumentCaptor.forClass(OperationErrorResponse.class);
+        ArgumentCaptor<VideoErrorResponse> error = ArgumentCaptor.forClass(VideoErrorResponse.class);
         verify(messagingTemplate).convertAndSendToUser(
                 eq(userId.toString()), eq("/queue/boards/" + boardId + "/video/errors"), error.capture());
-        assertThat(error.getValue().type()).isEqualTo("VIDEO_ERROR");
+        assertThat(error.getValue().code()).isEqualTo("FORBIDDEN");
         assertThat(error.getValue().message()).contains("no access");
     }
 
@@ -195,7 +219,7 @@ class VideoControllerTest {
         verify(messagingTemplate, never())
                 .convertAndSend(eq("/topic/boards/" + boardId + "/video"), any(Object.class));
         verify(messagingTemplate).convertAndSendToUser(
-                eq(userId.toString()), eq("/queue/boards/" + boardId + "/video/errors"), any(OperationErrorResponse.class));
+                eq(userId.toString()), eq("/queue/boards/" + boardId + "/video/errors"), any(VideoErrorResponse.class));
     }
 
     @Test
@@ -218,7 +242,48 @@ class VideoControllerTest {
 
         controller.handleException(new RuntimeException("boom"), boardId, principal);
         verify(messagingTemplate).convertAndSendToUser(
-                eq(userId.toString()), eq("/queue/boards/" + boardId + "/video/errors"), any(OperationErrorResponse.class));
+                eq(userId.toString()), eq("/queue/boards/" + boardId + "/video/errors"), any(VideoErrorResponse.class));
+    }
+
+    @Test
+    void roomFullRejectionCarriesTheRoomFullCode() {
+        controller().handleException(new VideoRoomFullException(boardId, 4), boardId, principal);
+
+        ArgumentCaptor<VideoErrorResponse> error = ArgumentCaptor.forClass(VideoErrorResponse.class);
+        verify(messagingTemplate).convertAndSendToUser(
+                eq(userId.toString()), eq("/queue/boards/" + boardId + "/video/errors"), error.capture());
+        assertThat(error.getValue().code()).isEqualTo("ROOM_FULL");
+    }
+
+    @Test
+    void roomNotFoundRejectionCarriesTheRoomNotFoundCode() {
+        controller().handleException(new VideoRoomNotFoundException(boardId), boardId, principal);
+
+        ArgumentCaptor<VideoErrorResponse> error = ArgumentCaptor.forClass(VideoErrorResponse.class);
+        verify(messagingTemplate).convertAndSendToUser(
+                eq(userId.toString()), eq("/queue/boards/" + boardId + "/video/errors"), error.capture());
+        assertThat(error.getValue().code()).isEqualTo("ROOM_NOT_FOUND");
+    }
+
+    @Test
+    void signalRejectionCarriesTheSignalingFailedCode() {
+        controller().handleException(new VideoSignalRejectedException("not an active participant"), boardId, principal);
+
+        ArgumentCaptor<VideoErrorResponse> error = ArgumentCaptor.forClass(VideoErrorResponse.class);
+        verify(messagingTemplate).convertAndSendToUser(
+                eq(userId.toString()), eq("/queue/boards/" + boardId + "/video/errors"), error.capture());
+        assertThat(error.getValue().code()).isEqualTo("SIGNALING_FAILED");
+    }
+
+    @Test
+    void rateLimitedSignalRejectionCarriesTheRateLimitedCode() {
+        controller().handleException(
+                new VideoSignalRejectedException("Too many signaling messages — please slow down"), boardId, principal);
+
+        ArgumentCaptor<VideoErrorResponse> error = ArgumentCaptor.forClass(VideoErrorResponse.class);
+        verify(messagingTemplate).convertAndSendToUser(
+                eq(userId.toString()), eq("/queue/boards/" + boardId + "/video/errors"), error.capture());
+        assertThat(error.getValue().code()).isEqualTo("RATE_LIMITED");
     }
 
     private SessionDisconnectEvent disconnectEvent() {

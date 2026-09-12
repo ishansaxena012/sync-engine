@@ -1,8 +1,14 @@
 package com.ishan.syncCanvas.video.controller;
 
-import com.ishan.syncCanvas.collaboration.dto.OperationErrorResponse;
+import com.ishan.syncCanvas.collaboration.exception.BoardAccessDeniedException;
 import com.ishan.syncCanvas.security.user.UserPrincipal;
+import com.ishan.syncCanvas.video.dto.VideoErrorResponse;
 import com.ishan.syncCanvas.video.dto.VideoSignalRequest;
+import com.ishan.syncCanvas.video.dto.VideoStateRequest;
+import com.ishan.syncCanvas.video.exception.VideoRoomAccessDeniedException;
+import com.ishan.syncCanvas.video.exception.VideoRoomFullException;
+import com.ishan.syncCanvas.video.exception.VideoRoomNotFoundException;
+import com.ishan.syncCanvas.video.exception.VideoSignalRejectedException;
 import com.ishan.syncCanvas.video.service.VideoRoomService;
 import com.ishan.syncCanvas.video.service.VideoSessionTracker;
 import com.ishan.syncCanvas.video.service.VideoSignalService;
@@ -23,10 +29,10 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Video-room lifecycle and membership over the existing STOMP connection. Signaling
- * (SDP/ICE/media) is out of scope here — this only ever exchanges "who is in the
- * call" state, on its own destinations, kept off both the canvas operation stream and
- * chat.
+ * Video-room lifecycle, membership and mic/camera state over the existing STOMP
+ * connection. Signaling (SDP/ICE/media) is handled by {@link VideoSignalService}; this
+ * class only extracts the authenticated sender and delegates, on its own destinations,
+ * kept off both the canvas operation stream and chat.
  *
  * <p>Protocol:
  * <ul>
@@ -37,14 +43,18 @@ import java.util.UUID;
  *   <li>SEND (no body) to {@code /app/boards/{boardId}/video/leave}</li>
  *   <li>SEND (no body) to {@code /app/boards/{boardId}/video/end} — only the room's
  *       creator may do this.</li>
- *   <li>SEND {@code {"type","targetUserId","payload"}} to {@code
- *       /app/boards/{boardId}/video/signal} — one WebRTC SDP offer/answer or ICE
+ *   <li>SEND {@code {"isMicEnabled","isCameraEnabled"}} to {@code
+ *       /app/boards/{boardId}/video/state} — the caller's own mic/camera toggle,
+ *       broadcast to the room as {@code PARTICIPANT_STATE_CHANGED}.</li>
+ *   <li>SEND {@code {"type","targetUserId","sdp"|"candidate","signalingSessionId"}} to
+ *       {@code /app/boards/{boardId}/video/signal} — one WebRTC SDP offer/answer or ICE
  *       candidate, forwarded to exactly one other active participant. See
- *       {@link VideoSignalService} for the full contract; this class only extracts the
- *       authenticated sender and delegates.</li>
- *   <li>RECEIVE room/membership changes on {@code /topic/boards/{boardId}/video}</li>
- *   <li>RECEIVE the caller's own full current-state reply, after start/join, on
- *       {@code /user/queue/boards/{boardId}/video/state}</li>
+ *       {@link VideoSignalService} for the full contract.</li>
+ *   <li>RECEIVE room/membership/state changes on {@code /topic/boards/{boardId}/video}</li>
+ *   <li>RECEIVE the caller's own full current roster, after start/join, on {@code
+ *       /user/queue/boards/{boardId}/video/roster}</li>
+ *   <li>RECEIVE the caller's own fresh signaling session id, after start/join, on
+ *       {@code /user/queue/boards/{boardId}/video/session}</li>
  *   <li>RECEIVE a signaling frame addressed to the caller on {@code
  *       /user/queue/boards/{boardId}/video/signal} — deliberately not the public
  *       {@code /topic/boards/{boardId}/video} topic, since every participant subscribes
@@ -108,6 +118,15 @@ public class VideoController {
         videoRoomService.end(boardId, user);
     }
 
+    @MessageMapping("/boards/{boardId}/video/state")
+    public void updateState(
+            @DestinationVariable UUID boardId,
+            VideoStateRequest request,
+            Principal principal) {
+        UserPrincipal user = requireUser(principal);
+        videoRoomService.updateParticipantState(boardId, user, request.isMicEnabled(), request.isCameraEnabled());
+    }
+
     @MessageMapping("/boards/{boardId}/video/signal")
     public void signal(
             @DestinationVariable UUID boardId,
@@ -154,9 +173,9 @@ public class VideoController {
 
     /**
      * Failures go back to the sender alone, on their private queue — mirrors {@code
-     * ChatController}. A rejected start/join/leave/end is nobody else's business, and
-     * broadcasting it would show every participant an error for a request they never
-     * made.
+     * ChatController}. A rejected request is nobody else's business, and broadcasting it
+     * would show every participant an error for a request they never made. {@code code}
+     * is a small, stable vocabulary the client maps to a user-facing message.
      */
     @MessageExceptionHandler
     public void handleException(Exception ex, @DestinationVariable UUID boardId, Principal principal) {
@@ -168,6 +187,23 @@ public class VideoController {
         messagingTemplate.convertAndSendToUser(
                 principal.getName(),
                 "/queue/boards/" + boardId + "/video/errors",
-                new OperationErrorResponse(null, "VIDEO_ERROR", ex.getMessage(), Instant.now()));
+                new VideoErrorResponse(errorCode(ex), ex.getMessage(), Instant.now()));
+    }
+
+    private String errorCode(Exception ex) {
+        if (ex instanceof VideoRoomFullException) {
+            return "ROOM_FULL";
+        }
+        if (ex instanceof VideoRoomNotFoundException) {
+            return "ROOM_NOT_FOUND";
+        }
+        if (ex instanceof VideoRoomAccessDeniedException || ex instanceof BoardAccessDeniedException) {
+            return "FORBIDDEN";
+        }
+        if (ex instanceof VideoSignalRejectedException) {
+            String message = ex.getMessage() == null ? "" : ex.getMessage().toLowerCase();
+            return message.contains("too many") ? "RATE_LIMITED" : "SIGNALING_FAILED";
+        }
+        return "VIDEO_ERROR";
     }
 }

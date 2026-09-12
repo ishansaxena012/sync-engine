@@ -12,7 +12,11 @@ import java.util.UUID;
  *
  * <p>Entirely server-assigned. {@code userId}/{@code userName} come from the
  * authenticated {@code UserPrincipal} at join time, {@code joinedAt} from the server
- * clock — never from client input.
+ * clock — never from client input. {@code isMicEnabled}/{@code isCameraEnabled} default
+ * to {@code true} at join and are only ever changed afterward by that same user's own
+ * explicit state update (see {@code VideoRoomService#updateParticipantState}), never by
+ * anyone else.
  */
-public record VideoParticipant(UUID userId, String userName, Instant joinedAt) {
+public record VideoParticipant(
+        UUID userId, String userName, Instant joinedAt, boolean isMicEnabled, boolean isCameraEnabled) {
 }

@@ -3,9 +3,11 @@ package com.ishan.syncCanvas.video.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ishan.syncCanvas.collaboration.service.BoardAccessGuard;
 import com.ishan.syncCanvas.security.user.UserPrincipal;
+import com.ishan.syncCanvas.video.dto.VideoRoomBroadcastEvent;
 import com.ishan.syncCanvas.video.dto.VideoRoomEvent;
 import com.ishan.syncCanvas.video.dto.VideoRoomEventType;
 import com.ishan.syncCanvas.video.dto.VideoRoomResponse;
+import com.ishan.syncCanvas.video.dto.VideoRosterResponse;
 import com.ishan.syncCanvas.video.dto.VideoSignalingSession;
 import com.ishan.syncCanvas.video.exception.VideoRoomAccessDeniedException;
 import com.ishan.syncCanvas.video.exception.VideoRoomFullException;
@@ -65,11 +67,11 @@ import java.util.UUID;
  * </ul>
  *
  * <p>Every join/start reply — not just the public broadcast — is also sent privately to
- * the caller on {@code /user/queue/boards/{boardId}/video/state}, carrying the full
+ * the caller on {@code /user/queue/boards/{boardId}/video/roster}, carrying the full
  * current roster, and a second private reply on {@code
  * /user/queue/boards/{boardId}/video/session} carrying that connection's fresh
  * signaling session id. A repeat join from a second tab produces no public broadcast
- * (nothing changed for anyone else), so without the private state reply that tab would
+ * (nothing changed for anyone else), so without the private roster reply that tab would
  * have no way to learn who is already in the call.
  *
  * <p>All five keys share one TTL, refreshed on every legitimate join/leave, as a safety
@@ -144,7 +146,7 @@ public class VideoRoomService {
                 log.warn("VIDEO_ROOM_FULL boardId={} userId={} maxParticipants={}", boardId, userId, maxParticipants);
                 throw new VideoRoomFullException(boardId, maxParticipants);
             }
-            VideoParticipant participant = new VideoParticipant(userId, user.getDisplayName(), Instant.now());
+            VideoParticipant participant = new VideoParticipant(userId, user.getDisplayName(), Instant.now(), true, true);
             hashOps().put(participantsKey(boardId), userId.toString(), writeJson(participant));
             VideoRoomEventType type = roomCount == 1 ? VideoRoomEventType.ROOM_STARTED : VideoRoomEventType.PARTICIPANT_JOINED;
             state = event(type, boardId, participant, currentRoster(boardId));
@@ -160,7 +162,7 @@ public class VideoRoomService {
             refreshRoomTtl(boardId);
         }
         String signalingSessionId = rotateSignalingSession(boardId, userId);
-        sendPrivateState(boardId, user.getName(), state);
+        sendRoster(boardId, user.getName());
         sendPrivateSignalingSession(boardId, user.getName(), signalingSessionId);
         return state;
     }
@@ -241,6 +243,30 @@ public class VideoRoomService {
     public boolean isCurrentSignalingSession(UUID boardId, UUID userId, String signalingSessionId) {
         String current = hashOps().get(sessionsKey(boardId), userId.toString());
         return current != null && current.equals(signalingSessionId);
+    }
+
+    /**
+     * Updates the caller's own mic/camera flags and broadcasts {@code
+     * PARTICIPANT_STATE_CHANGED} to the room. A no-op participant lookup (not an
+     * exception) if the caller isn't currently an active participant would silently
+     * discard a real toggle, so this rejects instead via {@link VideoRoomAccessDeniedException}
+     * — a user can only ever update their own state, never anyone else's.
+     */
+    public void updateParticipantState(UUID boardId, UserPrincipal user, boolean isMicEnabled, boolean isCameraEnabled) {
+        boardAccessGuard.assertAccessible(boardId, user.getId());
+        UUID userId = user.getId();
+
+        VideoParticipant existing = readParticipant(boardId, userId);
+        if (existing == null) {
+            throw new VideoRoomAccessDeniedException("You are not an active participant in this video call");
+        }
+
+        VideoParticipant updated = new VideoParticipant(
+                userId, existing.userName(), existing.joinedAt(), isMicEnabled, isCameraEnabled);
+        hashOps().put(participantsKey(boardId), userId.toString(), writeJson(updated));
+
+        VideoRoomEvent stateChanged = event(VideoRoomEventType.PARTICIPANT_STATE_CHANGED, boardId, updated, currentRoster(boardId));
+        publish(stateChanged);
     }
 
     /**
@@ -380,13 +406,15 @@ public class VideoRoomService {
     }
 
     private void publish(VideoRoomEvent event) {
-        messagingTemplate.convertAndSend("/topic/boards/" + event.boardId() + "/video", event);
+        messagingTemplate.convertAndSend(
+                "/topic/boards/" + event.boardId() + "/video", VideoRoomBroadcastEvent.from(event));
         videoEventBroadcaster.broadcast(event);
     }
 
-    private void sendPrivateState(UUID boardId, String principalName, VideoRoomEvent event) {
+    private void sendRoster(UUID boardId, String principalName) {
         messagingTemplate.convertAndSendToUser(
-                principalName, "/queue/boards/" + boardId + "/video/state", event);
+                principalName, "/queue/boards/" + boardId + "/video/roster",
+                new VideoRosterResponse(currentRoster(boardId)));
     }
 
     private HashOperations<String, String, String> hashOps() {

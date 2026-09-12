@@ -33,15 +33,15 @@ public class VideoSignalBroadcaster {
     @Getter
     private final String instanceId = UUID.randomUUID().toString();
 
-    public void broadcast(UUID targetUserId, VideoSignalMessage message) {
+    public void broadcast(UUID boardId, UUID targetUserId, VideoSignalMessage message) {
         try {
-            String json = objectMapper.writeValueAsString(new VideoSignalEnvelope(instanceId, targetUserId, message));
+            String json = objectMapper.writeValueAsString(new VideoSignalEnvelope(instanceId, boardId, targetUserId, message));
             redisTemplate.convertAndSend(videoSignalingTopic.getTopic(), json);
         } catch (Exception ex) {
             // Local delivery (attempted by the caller before this runs) already reached
             // the target if they happen to share this instance; a lost cross-instance
             // relay here must not fail the whole signaling send.
-            log.error("Failed to relay video signal ({}) for board {} to Redis", message.type(), message.boardId(), ex);
+            log.error("Failed to relay video signal ({}) for board {} to Redis", message.type(), boardId, ex);
         }
     }
 }

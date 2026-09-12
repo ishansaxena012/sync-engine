@@ -1,6 +1,7 @@
 package com.ishan.syncCanvas.video.publisher;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ishan.syncCanvas.video.dto.VideoRoomBroadcastEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.connection.Message;
@@ -36,7 +37,7 @@ public class VideoEventSubscriber implements MessageListener {
 
             messagingTemplate.convertAndSend(
                     "/topic/boards/" + envelope.event().boardId() + "/video",
-                    envelope.event());
+                    VideoRoomBroadcastEvent.from(envelope.event()));
 
         } catch (Exception ex) {
             log.error("Failed to relay video room event received from Redis", ex);

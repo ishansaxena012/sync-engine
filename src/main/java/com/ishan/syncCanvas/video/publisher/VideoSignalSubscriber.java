@@ -39,7 +39,7 @@ public class VideoSignalSubscriber implements MessageListener {
 
             messagingTemplate.convertAndSendToUser(
                     envelope.targetUserId().toString(),
-                    "/queue/boards/" + envelope.message().boardId() + "/video/signal",
+                    "/queue/boards/" + envelope.boardId() + "/video/signal",
                     envelope.message());
 
         } catch (Exception ex) {

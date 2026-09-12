@@ -2,6 +2,7 @@ package com.ishan.syncCanvas.video;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.ishan.syncCanvas.video.dto.VideoRoomBroadcastEvent;
 import com.ishan.syncCanvas.video.dto.VideoRoomEvent;
 import com.ishan.syncCanvas.video.dto.VideoRoomEventType;
 import com.ishan.syncCanvas.video.publisher.VideoEventBroadcaster;
@@ -67,7 +68,7 @@ class VideoEventSubscriberTest {
 
         verify(messagingTemplate).convertAndSend(
                 "/topic/boards/" + boardId + "/video",
-                event);
+                VideoRoomBroadcastEvent.from(event));
     }
 
     @Test

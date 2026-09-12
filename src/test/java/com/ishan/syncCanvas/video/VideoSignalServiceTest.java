@@ -94,7 +94,8 @@ class VideoSignalServiceTest {
     }
 
     private VideoSignalRequest request(VideoSignalType type, UUID target, JsonNode payload) {
-        return new VideoSignalRequest(type, target, currentSessionId, payload);
+        boolean isIce = type == VideoSignalType.ICE_CANDIDATE;
+        return new VideoSignalRequest(type, target, isIce ? null : payload, isIce ? payload : null, currentSessionId);
     }
 
     // ---------------------------------------------------------------- signaling (1-6)
@@ -136,9 +137,8 @@ class VideoSignalServiceTest {
         service.relay(boardId, sender, request(VideoSignalType.OFFER, targetUserId, sdpPayload()));
 
         ArgumentCaptor<VideoSignalMessage> captor = ArgumentCaptor.forClass(VideoSignalMessage.class);
-        verify(videoSignalBroadcaster).broadcast(eqTargetUuid(), captor.capture());
-        assertThat(captor.getValue().senderId()).isEqualTo(senderId);
-        assertThat(captor.getValue().senderName()).isEqualTo("Ishan");
+        verify(videoSignalBroadcaster).broadcast(eq(boardId), eqTargetUuid(), captor.capture());
+        assertThat(captor.getValue().fromUserId()).isEqualTo(senderId);
     }
 
     @Test
@@ -146,7 +146,7 @@ class VideoSignalServiceTest {
         UUID spoofedSenderId = UUID.randomUUID();
         String rawJson = "{\"type\":\"OFFER\",\"targetUserId\":\"" + targetUserId
                 + "\",\"signalingSessionId\":\"" + currentSessionId
-                + "\",\"senderId\":\"" + spoofedSenderId + "\",\"payload\":{\"sdp\":\"v=0\"}}";
+                + "\",\"senderId\":\"" + spoofedSenderId + "\",\"sdp\":{\"sdp\":\"v=0\"}}";
 
         // VideoSignalRequest has no senderId component at all, so Jackson's default
         // "ignore unknown properties" behavior drops it silently rather than binding it.
@@ -155,8 +155,8 @@ class VideoSignalServiceTest {
         service.relay(boardId, sender, parsed);
 
         ArgumentCaptor<VideoSignalMessage> captor = ArgumentCaptor.forClass(VideoSignalMessage.class);
-        verify(videoSignalBroadcaster).broadcast(eqTargetUuid(), captor.capture());
-        assertThat(captor.getValue().senderId()).isEqualTo(senderId).isNotEqualTo(spoofedSenderId);
+        verify(videoSignalBroadcaster).broadcast(eq(boardId), eqTargetUuid(), captor.capture());
+        assertThat(captor.getValue().fromUserId()).isEqualTo(senderId).isNotEqualTo(spoofedSenderId);
     }
 
     // ---------------------------------------------------------------- targeting (7-10)
@@ -245,13 +245,15 @@ class VideoSignalServiceTest {
     // ------------------------------------------- signaling session / reconnect (7-12, 25)
 
     @Test
-    void requestWithoutASignalingSessionIsRejected() {
-        VideoSignalRequest noSession = new VideoSignalRequest(VideoSignalType.OFFER, targetUserId, null, sdpPayload());
+    void requestWithoutASignalingSessionStillWorksForClientsThatDoNotSendOne() {
+        // The current frontend never sends this field at all -- freshness checking is
+        // opt-in, and its absence must never block a legitimate signal.
+        VideoSignalRequest noSession = new VideoSignalRequest(VideoSignalType.OFFER, targetUserId, sdpPayload(), null, null);
 
-        assertThatThrownBy(() -> service.relay(boardId, sender, noSession))
-                .isInstanceOf(VideoSignalRejectedException.class)
-                .hasMessageContaining("signaling session id is required");
-        verifyNoInteractions(messagingTemplate, videoSignalBroadcaster);
+        service.relay(boardId, sender, noSession);
+
+        verify(messagingTemplate).convertAndSendToUser(eqTargetString(), eqSignalDestination(), any(VideoSignalMessage.class));
+        verify(videoRoomService, never()).isCurrentSignalingSession(any(), any(), any());
     }
 
     @Test
@@ -261,7 +263,7 @@ class VideoSignalServiceTest {
         String staleSessionId = "stale-" + UUID.randomUUID();
         when(videoRoomService.isCurrentSignalingSession(boardId, senderId, staleSessionId)).thenReturn(false);
 
-        VideoSignalRequest stale = new VideoSignalRequest(VideoSignalType.OFFER, targetUserId, staleSessionId, sdpPayload());
+        VideoSignalRequest stale = new VideoSignalRequest(VideoSignalType.OFFER, targetUserId, sdpPayload(), null, staleSessionId);
 
         assertThatThrownBy(() -> service.relay(boardId, sender, stale))
                 .isInstanceOf(VideoSignalRejectedException.class)
@@ -275,7 +277,7 @@ class VideoSignalServiceTest {
         String freshSessionId = "fresh-" + UUID.randomUUID();
         when(videoRoomService.isCurrentSignalingSession(boardId, senderId, freshSessionId)).thenReturn(true);
 
-        VideoSignalRequest afterReconnect = new VideoSignalRequest(VideoSignalType.OFFER, targetUserId, freshSessionId, sdpPayload());
+        VideoSignalRequest afterReconnect = new VideoSignalRequest(VideoSignalType.OFFER, targetUserId, sdpPayload(), null, freshSessionId);
         service.relay(boardId, sender, afterReconnect);
 
         verify(messagingTemplate).convertAndSendToUser(eqTargetString(), eqSignalDestination(), any(VideoSignalMessage.class));
@@ -305,7 +307,7 @@ class VideoSignalServiceTest {
         service.relay(boardId, sender, request(VideoSignalType.OFFER, targetUserId, sdpPayload()));
 
         verify(messagingTemplate).convertAndSendToUser(eqTargetString(), eqSignalDestination(), any(VideoSignalMessage.class));
-        verify(videoSignalBroadcaster).broadcast(eqTargetUuid(), any(VideoSignalMessage.class));
+        verify(videoSignalBroadcaster).broadcast(eq(boardId), eqTargetUuid(), any(VideoSignalMessage.class));
     }
 
     @Test
@@ -322,7 +324,7 @@ class VideoSignalServiceTest {
 
     @Test
     void requestWithNoTypeIsRejected() {
-        VideoSignalRequest malformed = new VideoSignalRequest(null, targetUserId, currentSessionId, sdpPayload());
+        VideoSignalRequest malformed = new VideoSignalRequest(null, targetUserId, sdpPayload(), null, currentSessionId);
 
         assertThatThrownBy(() -> service.relay(boardId, sender, malformed))
                 .isInstanceOf(VideoSignalRejectedException.class)

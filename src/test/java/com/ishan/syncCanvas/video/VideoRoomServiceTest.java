@@ -9,6 +9,7 @@ import com.ishan.syncCanvas.user.entity.User;
 import com.ishan.syncCanvas.video.dto.VideoRoomEvent;
 import com.ishan.syncCanvas.video.dto.VideoRoomEventType;
 import com.ishan.syncCanvas.video.dto.VideoRoomResponse;
+import com.ishan.syncCanvas.video.dto.VideoRosterResponse;
 import com.ishan.syncCanvas.video.dto.VideoSignalingSession;
 import com.ishan.syncCanvas.video.exception.VideoRoomAccessDeniedException;
 import com.ishan.syncCanvas.video.exception.VideoRoomFullException;
@@ -141,7 +142,7 @@ class VideoRoomServiceTest {
     /** Seeds the participants-hash fixture as if the given user had already joined. */
     private void seedExistingParticipant(UUID id, String name) throws Exception {
         participantsBacking.put(id.toString(),
-                objectMapper.writeValueAsString(new VideoParticipant(id, name, Instant.now())));
+                objectMapper.writeValueAsString(new VideoParticipant(id, name, Instant.now(), true, true)));
     }
 
     /** Mocks a genuine first-ever join: empty room, first tab, first participant. */
@@ -227,9 +228,9 @@ class VideoRoomServiceTest {
         verify(hashOperations, never()).put(eq(participantsKey), anyString(), anyString());
         verifyNoInteractions(videoEventBroadcaster);
         verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
-        // The joining tab still learns the current state, privately.
+        // The joining tab still learns the current roster, privately.
         verify(messagingTemplate).convertAndSendToUser(
-                eq(userId.toString()), eq("/queue/boards/" + boardId + "/video/state"), any(VideoRoomEvent.class));
+                eq(userId.toString()), eq("/queue/boards/" + boardId + "/video/roster"), any(VideoRosterResponse.class));
     }
 
     @Test
@@ -559,6 +560,54 @@ class VideoRoomServiceTest {
     @Test
     void isCurrentSignalingSessionIsFalseWhenNoSessionHasEverBeenIssued() {
         assertThat(videoRoomService.isCurrentSignalingSession(boardId, userId, "anything")).isFalse();
+    }
+
+    // ---------------------------------------------------------------- mic/camera state
+
+    @Test
+    void updateParticipantStateUpdatesStoredFlagsAndBroadcasts() throws Exception {
+        seedExistingParticipant(userId, "Ishan");
+
+        videoRoomService.updateParticipantState(boardId, caller(), false, true);
+
+        VideoParticipant stored = objectMapper.readValue(participantsBacking.get(userId.toString()), VideoParticipant.class);
+        assertThat(stored.isMicEnabled()).isFalse();
+        assertThat(stored.isCameraEnabled()).isTrue();
+        assertThat(stored.userName()).isEqualTo("Ishan"); // untouched by the update
+        verify(messagingTemplate).convertAndSend(eq("/topic/boards/" + boardId + "/video"), any(Object.class));
+        verify(videoEventBroadcaster).broadcast(any());
+    }
+
+    @Test
+    void updateParticipantStateIsRejectedWhenNotAnActiveParticipant() {
+        assertThatThrownBy(() -> videoRoomService.updateParticipantState(boardId, caller(), false, false))
+                .isInstanceOf(VideoRoomAccessDeniedException.class);
+
+        verifyNoInteractions(videoEventBroadcaster);
+        verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
+    }
+
+    @Test
+    void updateParticipantStateRequiresBoardAccess() {
+        doThrow(new BoardAccessDeniedException("no access")).when(boardAccessGuard).assertAccessible(boardId, userId);
+
+        assertThatThrownBy(() -> videoRoomService.updateParticipantState(boardId, caller(), true, true))
+                .isInstanceOf(BoardAccessDeniedException.class);
+
+        verifyNoInteractions(videoEventBroadcaster, messagingTemplate);
+    }
+
+    @Test
+    void updateParticipantStateCannotChangeSomeoneElsesFlags() throws Exception {
+        // updateParticipantState only ever takes the caller's own UserPrincipal id --
+        // there is no target-user parameter anywhere in its signature to spoof.
+        seedExistingParticipant(otherUserId, "Priya");
+
+        assertThatThrownBy(() -> videoRoomService.updateParticipantState(boardId, caller(), false, false))
+                .isInstanceOf(VideoRoomAccessDeniedException.class);
+
+        VideoParticipant stillUnchanged = objectMapper.readValue(participantsBacking.get(otherUserId.toString()), VideoParticipant.class);
+        assertThat(stillUnchanged.isMicEnabled()).isTrue();
     }
 
     // ---------------------------------------------------------------- REST snapshot

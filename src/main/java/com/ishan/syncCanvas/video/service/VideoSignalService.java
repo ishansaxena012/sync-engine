@@ -26,16 +26,15 @@ import java.util.UUID;
  *
  * <p>Every send re-derives sender identity from the authenticated {@link UserPrincipal},
  * never from the request body (which has no sender field to begin with), and re-checks
- * board access, live room membership, and signaling-session freshness on every single
- * frame rather than trusting a connection-time check — a call can end, a participant can
- * leave, or a newer connection can supersede this one mid-negotiation, and the very next
- * signal from or to them must be rejected, not delivered.
+ * board access and live room membership on every single frame rather than trusting a
+ * connection-time check — a call can end or a participant can leave mid-negotiation, and
+ * the very next signal from or to them must be rejected, not delivered. Signaling-session
+ * freshness is also checked whenever the client supplies one (see {@link VideoSignalRequest}).
  *
- * <p>Validation order mirrors the full chain this phase requires: board access → active
- * participant → current signaling session → valid target → message type/payload shape →
- * payload size → rate limit → delivery. Any failure aborts before local delivery or
- * Redis relay, and is logged as {@code VIDEO_SIGNAL_REJECTED} with no SDP/ICE content —
- * only board/user/type metadata.
+ * <p>Validation order: board access → active participant → session freshness (if
+ * supplied) → valid target → message type/payload shape → payload size → rate limit →
+ * delivery. Any failure aborts before local delivery or Redis relay, and is logged as
+ * {@code VIDEO_SIGNAL_REJECTED} with no SDP/ICE content — only board/user/type metadata.
  */
 @Slf4j
 @Service
@@ -80,7 +79,10 @@ public class VideoSignalService {
         if (!videoRoomService.isActiveParticipant(boardId, sender.getId())) {
             throw new VideoSignalRejectedException("You are not an active participant in this video call");
         }
-        if (!videoRoomService.isCurrentSignalingSession(boardId, sender.getId(), request.signalingSessionId())) {
+        // Session freshness is only enforced when the client actually participates in
+        // that protocol -- see VideoSignalRequest's Javadoc for why this is optional.
+        if (request.signalingSessionId() != null
+                && !videoRoomService.isCurrentSignalingSession(boardId, sender.getId(), request.signalingSessionId())) {
             throw new VideoSignalRejectedException("Stale signaling session — reconnect and rejoin the call");
         }
         // Scoped to this exact board's room, so this single check simultaneously rules
@@ -93,12 +95,14 @@ public class VideoSignalService {
         rateLimiter.assertWithinLimit(boardId, sender.getId(), request.type());
         validatePayloadSize(request.type(), request.payload());
 
+        boolean isIce = request.type() == VideoSignalType.ICE_CANDIDATE;
         VideoSignalMessage message = new VideoSignalMessage(
-                request.type(), boardId, sender.getId(), sender.getDisplayName(),
-                request.payload(), Instant.now().toEpochMilli());
+                request.type(), sender.getId(),
+                isIce ? null : request.payload(), isIce ? request.payload() : null,
+                Instant.now().toEpochMilli());
 
-        deliverLocally(targetUserId, message);
-        videoSignalBroadcaster.broadcast(targetUserId, message);
+        deliverLocally(boardId, targetUserId, message);
+        videoSignalBroadcaster.broadcast(boardId, targetUserId, message);
     }
 
     private void validateRequest(VideoSignalRequest request) {
@@ -108,9 +112,6 @@ public class VideoSignalService {
         if (request.targetUserId() == null) {
             throw new VideoSignalRejectedException("A target participant is required");
         }
-        if (request.signalingSessionId() == null || request.signalingSessionId().isBlank()) {
-            throw new VideoSignalRejectedException("A signaling session id is required");
-        }
         if (request.payload() == null || request.payload().isNull()) {
             throw new VideoSignalRejectedException("Signaling payload is required");
         }
@@ -119,10 +120,10 @@ public class VideoSignalService {
         }
     }
 
-    private void deliverLocally(UUID targetUserId, VideoSignalMessage message) {
+    private void deliverLocally(UUID boardId, UUID targetUserId, VideoSignalMessage message) {
         messagingTemplate.convertAndSendToUser(
                 targetUserId.toString(),
-                "/queue/boards/" + message.boardId() + "/video/signal",
+                "/queue/boards/" + boardId + "/video/signal",
                 message);
     }
 
