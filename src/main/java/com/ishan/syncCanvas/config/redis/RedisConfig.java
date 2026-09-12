@@ -12,6 +12,7 @@ import com.ishan.syncCanvas.collaboration.lifecycle.BoardClosureSubscriber;
 import com.ishan.syncCanvas.collaboration.presence.PresenceEventSubscriber;
 import com.ishan.syncCanvas.collaboration.publisher.RedisOperationSubscriber;
 import com.ishan.syncCanvas.video.publisher.VideoEventSubscriber;
+import com.ishan.syncCanvas.video.publisher.VideoSignalSubscriber;
 
 @Configuration
 public class RedisConfig {
@@ -22,6 +23,7 @@ public class RedisConfig {
     public static final String BOARD_CLOSURE_CHANNEL = "syncCanvas:board-closure";
     public static final String CHAT_EVENTS_CHANNEL = "syncCanvas:chat-events";
     public static final String VIDEO_EVENTS_CHANNEL = "syncCanvas:video-events";
+    public static final String VIDEO_SIGNALING_CHANNEL = "syncCanvas:video-signaling";
 
     @Bean
     public ChannelTopic boardOperationsTopic() {
@@ -55,6 +57,12 @@ public class RedisConfig {
         return new ChannelTopic(VIDEO_EVENTS_CHANNEL);
     }
 
+    /** WebRTC signaling (SDP/ICE) gets its own channel, separate from the low-volume room lifecycle channel above. */
+    @Bean
+    public ChannelTopic videoSignalingTopic() {
+        return new ChannelTopic(VIDEO_SIGNALING_CHANNEL);
+    }
+
     @Bean
     public RedisMessageListenerContainer redisMessageListenerContainer(
             RedisConnectionFactory connectionFactory,
@@ -69,7 +77,9 @@ public class RedisConfig {
             ChatEventSubscriber chatEventSubscriber,
             ChannelTopic chatEventsTopic,
             VideoEventSubscriber videoEventSubscriber,
-            ChannelTopic videoEventsTopic) {
+            ChannelTopic videoEventsTopic,
+            VideoSignalSubscriber videoSignalSubscriber,
+            ChannelTopic videoSignalingTopic) {
 
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();
         container.setConnectionFactory(connectionFactory);
@@ -79,6 +89,7 @@ public class RedisConfig {
         container.addMessageListener(boardClosureSubscriber, boardClosureTopic);
         container.addMessageListener(chatEventSubscriber, chatEventsTopic);
         container.addMessageListener(videoEventSubscriber, videoEventsTopic);
+        container.addMessageListener(videoSignalSubscriber, videoSignalingTopic);
         return container;
     }
 }

@@ -2,8 +2,10 @@ package com.ishan.syncCanvas.video.controller;
 
 import com.ishan.syncCanvas.collaboration.dto.OperationErrorResponse;
 import com.ishan.syncCanvas.security.user.UserPrincipal;
+import com.ishan.syncCanvas.video.dto.VideoSignalRequest;
 import com.ishan.syncCanvas.video.service.VideoRoomService;
 import com.ishan.syncCanvas.video.service.VideoSessionTracker;
+import com.ishan.syncCanvas.video.service.VideoSignalService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
@@ -35,9 +37,18 @@ import java.util.UUID;
  *   <li>SEND (no body) to {@code /app/boards/{boardId}/video/leave}</li>
  *   <li>SEND (no body) to {@code /app/boards/{boardId}/video/end} — only the room's
  *       creator may do this.</li>
+ *   <li>SEND {@code {"type","targetUserId","payload"}} to {@code
+ *       /app/boards/{boardId}/video/signal} — one WebRTC SDP offer/answer or ICE
+ *       candidate, forwarded to exactly one other active participant. See
+ *       {@link VideoSignalService} for the full contract; this class only extracts the
+ *       authenticated sender and delegates.</li>
  *   <li>RECEIVE room/membership changes on {@code /topic/boards/{boardId}/video}</li>
  *   <li>RECEIVE the caller's own full current-state reply, after start/join, on
  *       {@code /user/queue/boards/{boardId}/video/state}</li>
+ *   <li>RECEIVE a signaling frame addressed to the caller on {@code
+ *       /user/queue/boards/{boardId}/video/signal} — deliberately not the public
+ *       {@code /topic/boards/{boardId}/video} topic, since every participant subscribes
+ *       to that and SDP/ICE data must reach only its intended target.</li>
  *   <li>RECEIVE send failures on {@code /user/queue/boards/{boardId}/video/errors}</li>
  * </ul>
  *
@@ -60,6 +71,7 @@ public class VideoController {
     private final VideoRoomService videoRoomService;
     private final VideoSessionTracker sessionTracker;
     private final SimpMessagingTemplate messagingTemplate;
+    private final VideoSignalService videoSignalService;
 
     @MessageMapping("/boards/{boardId}/video/start")
     public void start(
@@ -94,6 +106,15 @@ public class VideoController {
     public void end(@DestinationVariable UUID boardId, Principal principal) {
         UserPrincipal user = requireUser(principal);
         videoRoomService.end(boardId, user);
+    }
+
+    @MessageMapping("/boards/{boardId}/video/signal")
+    public void signal(
+            @DestinationVariable UUID boardId,
+            VideoSignalRequest request,
+            Principal principal) {
+        UserPrincipal user = requireUser(principal);
+        videoSignalService.relay(boardId, user, request);
     }
 
     /**

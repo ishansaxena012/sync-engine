@@ -164,6 +164,19 @@ public class VideoRoomService {
     }
 
     /**
+     * True if the given user currently holds an active connection in this board's video
+     * room. No access check here — this is a pure membership query used by
+     * {@code VideoSignalService} to validate signaling senders and targets, and the
+     * caller has already checked board access itself. Scoped to a single board's
+     * participants hash, so this doubles as the "same room" and "not stale" check:
+     * a user who left, whose call ended, or who is only active in a different board's
+     * call, is indistinguishable from one who was never here at all.
+     */
+    public boolean isActiveParticipant(UUID boardId, UUID userId) {
+        return Boolean.TRUE.equals(hashOps().hasKey(participantsKey(boardId), userId.toString()));
+    }
+
+    /**
      * Wipes a board's video-room state with no broadcast — called from board deletion
      * alongside {@code PresenceService}/{@code CursorService}'s own {@code
      * clearBoardState}. Silent for the same reason theirs are: {@code BOARD_CLOSED} on

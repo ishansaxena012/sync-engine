@@ -5,9 +5,11 @@ import com.ishan.syncCanvas.collaboration.exception.BoardAccessDeniedException;
 import com.ishan.syncCanvas.security.user.UserPrincipal;
 import com.ishan.syncCanvas.user.entity.User;
 import com.ishan.syncCanvas.video.controller.VideoController;
+import com.ishan.syncCanvas.video.dto.VideoSignalRequest;
 import com.ishan.syncCanvas.video.exception.VideoRoomAccessDeniedException;
 import com.ishan.syncCanvas.video.service.VideoRoomService;
 import com.ishan.syncCanvas.video.service.VideoSessionTracker;
+import com.ishan.syncCanvas.video.service.VideoSignalService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -44,6 +46,8 @@ class VideoControllerTest {
     private VideoSessionTracker sessionTracker;
     @Mock
     private SimpMessagingTemplate messagingTemplate;
+    @Mock
+    private VideoSignalService videoSignalService;
 
     private VideoController controller;
 
@@ -57,7 +61,7 @@ class VideoControllerTest {
             UserPrincipal.create(User.builder().id(userId).name("Ishan").email("ishan@example.com").build());
 
     private VideoController controller() {
-        return new VideoController(videoRoomService, sessionTracker, messagingTemplate);
+        return new VideoController(videoRoomService, sessionTracker, messagingTemplate, videoSignalService);
     }
 
     @Test
@@ -90,6 +94,29 @@ class VideoControllerTest {
 
         verify(videoRoomService).end(boardId, principal);
         verifyNoInteractions(sessionTracker);
+    }
+
+    @Test
+    void signalDelegatesToTheSignalServiceWithTheAuthenticatedSender() {
+        VideoSignalRequest request = new VideoSignalRequest(
+                com.ishan.syncCanvas.video.dto.VideoSignalType.OFFER, UUID.randomUUID(), null);
+
+        controller().signal(boardId, request, principal);
+
+        verify(videoSignalService).relay(boardId, principal, request);
+    }
+
+    @Test
+    void unauthenticatedSignalIsRejectedWithoutReachingTheService() {
+        Principal anonymous = () -> "someone";
+        VideoController controller = controller();
+        VideoSignalRequest request = new VideoSignalRequest(
+                com.ishan.syncCanvas.video.dto.VideoSignalType.OFFER, UUID.randomUUID(), null);
+
+        assertThatThrownBy(() -> controller.signal(boardId, request, anonymous))
+                .isInstanceOf(IllegalStateException.class);
+
+        verifyNoInteractions(videoSignalService);
     }
 
     @Test
