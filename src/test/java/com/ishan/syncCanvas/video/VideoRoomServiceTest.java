@@ -9,7 +9,9 @@ import com.ishan.syncCanvas.user.entity.User;
 import com.ishan.syncCanvas.video.dto.VideoRoomEvent;
 import com.ishan.syncCanvas.video.dto.VideoRoomEventType;
 import com.ishan.syncCanvas.video.dto.VideoRoomResponse;
+import com.ishan.syncCanvas.video.dto.VideoSignalingSession;
 import com.ishan.syncCanvas.video.exception.VideoRoomAccessDeniedException;
+import com.ishan.syncCanvas.video.exception.VideoRoomFullException;
 import com.ishan.syncCanvas.video.exception.VideoRoomNotFoundException;
 import com.ishan.syncCanvas.video.model.VideoParticipant;
 import com.ishan.syncCanvas.video.publisher.VideoEventBroadcaster;
@@ -17,6 +19,7 @@ import com.ishan.syncCanvas.video.service.VideoRoomService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.RedisConnectionFailureException;
@@ -24,6 +27,7 @@ import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -74,6 +78,7 @@ class VideoRoomServiceTest {
     private String connectionsKey;
     private String countKey;
     private String creatorKey;
+    private String sessionsKey;
 
     /**
      * A bare mock of the participants hash would report itself as empty forever,
@@ -84,6 +89,9 @@ class VideoRoomServiceTest {
      */
     private final Map<String, String> participantsBacking = new LinkedHashMap<>();
 
+    /** Same idea as {@link #participantsBacking}, for the signaling-session hash. */
+    private final Map<String, String> sessionsBacking = new LinkedHashMap<>();
+
     @BeforeEach
     void setUp() {
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
@@ -92,11 +100,14 @@ class VideoRoomServiceTest {
         objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         videoRoomService = new VideoRoomService(
                 redisTemplate, objectMapper, messagingTemplate, videoEventBroadcaster, boardAccessGuard);
+        ReflectionTestUtils.setField(videoRoomService, "maxParticipants", 4);
+        ReflectionTestUtils.setField(videoRoomService, "roomTtlSeconds", 21600L);
 
         participantsKey = "video:board:" + boardId + ":participants";
         connectionsKey = "video:board:" + boardId + ":connections";
         countKey = "video:board:" + boardId + ":count";
         creatorKey = "video:board:" + boardId + ":creator";
+        sessionsKey = "video:board:" + boardId + ":sessions";
 
         lenient().doAnswer(inv -> {
             participantsBacking.put(inv.getArgument(1), inv.getArgument(2));
@@ -110,6 +121,13 @@ class VideoRoomServiceTest {
             Object removed = participantsBacking.remove((String) inv.getArgument(1));
             return removed == null ? 0L : 1L;
         });
+
+        lenient().doAnswer(inv -> {
+            sessionsBacking.put(inv.getArgument(1), inv.getArgument(2));
+            return null;
+        }).when(hashOperations).put(eq(sessionsKey), anyString(), anyString());
+        lenient().when(hashOperations.get(eq(sessionsKey), anyString()))
+                .thenAnswer(inv -> sessionsBacking.get((String) inv.getArgument(1)));
     }
 
     private UserPrincipal principal(UUID id, String name) {
@@ -243,7 +261,7 @@ class VideoRoomServiceTest {
         assertThat(event).isPresent();
         assertThat(event.get().type()).isEqualTo(VideoRoomEventType.ROOM_ENDED);
         assertThat(event.get().participants()).isEmpty();
-        verify(redisTemplate).delete(List.of(participantsKey, connectionsKey, countKey, creatorKey));
+        verify(redisTemplate).delete(List.of(participantsKey, connectionsKey, countKey, creatorKey, sessionsKey));
     }
 
     @Test
@@ -266,7 +284,7 @@ class VideoRoomServiceTest {
 
         assertThat(event.type()).isEqualTo(VideoRoomEventType.ROOM_ENDED);
         assertThat(event.participants()).isEmpty();
-        verify(redisTemplate).delete(List.of(participantsKey, connectionsKey, countKey, creatorKey));
+        verify(redisTemplate).delete(List.of(participantsKey, connectionsKey, countKey, creatorKey, sessionsKey));
     }
 
     @Test
@@ -383,7 +401,7 @@ class VideoRoomServiceTest {
 
         videoRoomService.removeParticipantOnDisconnect(boardId, userId);
 
-        verify(redisTemplate).delete(List.of(participantsKey, connectionsKey, countKey, creatorKey));
+        verify(redisTemplate).delete(List.of(participantsKey, connectionsKey, countKey, creatorKey, sessionsKey));
         // No board-access check for a disconnect-triggered cleanup — access being
         // revoked must never block removing stale membership.
         verifyNoInteractions(boardAccessGuard);
@@ -407,7 +425,7 @@ class VideoRoomServiceTest {
     void clearBoardStateDeletesAllVideoKeysSilently() {
         videoRoomService.clearBoardState(boardId);
 
-        verify(redisTemplate).delete(List.of(participantsKey, connectionsKey, countKey, creatorKey));
+        verify(redisTemplate).delete(List.of(participantsKey, connectionsKey, countKey, creatorKey, sessionsKey));
         verifyNoInteractions(videoEventBroadcaster, messagingTemplate);
     }
 
@@ -440,6 +458,107 @@ class VideoRoomServiceTest {
 
         assertThatThrownBy(() -> videoRoomService.leave(boardId, caller()))
                 .isInstanceOf(RedisConnectionFailureException.class);
+    }
+
+    // ---------------------------------------------------------------- room capacity
+
+    @Test
+    void joinIsRejectedWhenTheRoomIsAlreadyAtCapacity() {
+        ReflectionTestUtils.setField(videoRoomService, "maxParticipants", 2);
+        when(hashOperations.increment(connectionsKey, userId.toString(), 1L)).thenReturn(1L);
+        when(valueOperations.increment(countKey)).thenReturn(3L); // already 2 present, this would be a 3rd
+
+        assertThatThrownBy(() -> videoRoomService.join(boardId, caller()))
+                .isInstanceOf(VideoRoomFullException.class);
+
+        // Rejected before ever recording the participant or broadcasting anything.
+        verify(hashOperations, never()).put(eq(participantsKey), anyString(), anyString());
+        verifyNoInteractions(videoEventBroadcaster);
+        // Both increments are rolled back so the room's real occupancy is unaffected.
+        verify(valueOperations).decrement(countKey);
+        verify(hashOperations).increment(connectionsKey, userId.toString(), -1L);
+    }
+
+    @Test
+    void joinSucceedsExactlyAtTheConfiguredLimit() {
+        ReflectionTestUtils.setField(videoRoomService, "maxParticipants", 2);
+        when(hashOperations.increment(connectionsKey, userId.toString(), 1L)).thenReturn(1L);
+        when(valueOperations.increment(countKey)).thenReturn(2L); // exactly at the limit, not over it
+
+        VideoRoomEvent event = videoRoomService.join(boardId, caller());
+
+        assertThat(event.type()).isEqualTo(VideoRoomEventType.PARTICIPANT_JOINED);
+    }
+
+    @Test
+    void aSecondTabOfAnAlreadyActiveParticipantIsExemptFromTheCapacityCheck() {
+        ReflectionTestUtils.setField(videoRoomService, "maxParticipants", 1);
+        // tabCount > 1 -- this is the same participant's second tab, not a new one, so
+        // the room-count path (and therefore the capacity check) is never touched.
+        when(hashOperations.increment(connectionsKey, userId.toString(), 1L)).thenReturn(2L);
+
+        VideoRoomEvent event = videoRoomService.join(boardId, caller());
+
+        assertThat(event.type()).isEqualTo(VideoRoomEventType.ROOM_STATE);
+        verify(valueOperations, never()).increment(countKey);
+    }
+
+    // ---------------------------------------------------------------- signaling session
+
+    @Test
+    void joinReturnsAFreshSignalingSessionPrivately() {
+        mockGenuineFirstJoin();
+
+        videoRoomService.join(boardId, caller());
+
+        ArgumentCaptor<VideoSignalingSession> captor = ArgumentCaptor.forClass(VideoSignalingSession.class);
+        verify(messagingTemplate).convertAndSendToUser(
+                eq(userId.toString()), eq("/queue/boards/" + boardId + "/video/session"), captor.capture());
+        assertThat(captor.getValue().signalingSessionId()).isNotBlank();
+    }
+
+    @Test
+    void everyJoinCallRotatesToANewSignalingSessionSupersedingTheOldOne() {
+        mockGenuineFirstJoin();
+        videoRoomService.join(boardId, caller());
+        String firstSessionId = sessionsBacking.get(userId.toString());
+
+        // Same user, a second connection (their own reconnect, or a second tab) --
+        // tabCount now 2, no new room-count/capacity involvement.
+        when(hashOperations.increment(connectionsKey, userId.toString(), 1L)).thenReturn(2L);
+        videoRoomService.join(boardId, caller());
+        String secondSessionId = sessionsBacking.get(userId.toString());
+
+        assertThat(secondSessionId).isNotBlank().isNotEqualTo(firstSessionId);
+        assertThat(videoRoomService.isCurrentSignalingSession(boardId, userId, firstSessionId)).isFalse();
+        assertThat(videoRoomService.isCurrentSignalingSession(boardId, userId, secondSessionId)).isTrue();
+    }
+
+    @Test
+    void rejoinAfterDisconnectProducesAGenuinelyNewParticipantAndSession() {
+        // First join, then a full disconnect (drains to zero, deletes room state).
+        mockGenuineFirstJoin();
+        videoRoomService.join(boardId, caller());
+        String firstSessionId = sessionsBacking.get(userId.toString());
+
+        when(redisTemplate.hasKey(countKey)).thenReturn(true);
+        when(hashOperations.increment(connectionsKey, userId.toString(), -1L)).thenReturn(0L);
+        when(valueOperations.decrement(countKey)).thenReturn(0L);
+        videoRoomService.removeParticipantOnDisconnect(boardId, userId);
+        sessionsBacking.clear(); // deleteRoomKeys() would really wipe the sessions hash too
+
+        // Rejoin looks exactly like a brand new join -- a fresh distinct participant.
+        when(hashOperations.increment(connectionsKey, userId.toString(), 1L)).thenReturn(1L);
+        when(valueOperations.increment(countKey)).thenReturn(1L);
+        videoRoomService.join(boardId, caller());
+        String rejoinSessionId = sessionsBacking.get(userId.toString());
+
+        assertThat(rejoinSessionId).isNotBlank().isNotEqualTo(firstSessionId);
+    }
+
+    @Test
+    void isCurrentSignalingSessionIsFalseWhenNoSessionHasEverBeenIssued() {
+        assertThat(videoRoomService.isCurrentSignalingSession(boardId, userId, "anything")).isFalse();
     }
 
     // ---------------------------------------------------------------- REST snapshot

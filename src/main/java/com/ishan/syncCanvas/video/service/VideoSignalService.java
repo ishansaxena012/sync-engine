@@ -10,6 +10,8 @@ import com.ishan.syncCanvas.video.dto.VideoSignalType;
 import com.ishan.syncCanvas.video.exception.VideoSignalRejectedException;
 import com.ishan.syncCanvas.video.publisher.VideoSignalBroadcaster;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
@@ -24,18 +26,27 @@ import java.util.UUID;
  *
  * <p>Every send re-derives sender identity from the authenticated {@link UserPrincipal},
  * never from the request body (which has no sender field to begin with), and re-checks
- * board access and live room membership on every single frame rather than trusting a
- * connection-time check — a call can end or a participant can leave mid-negotiation, and
- * the very next signal from or to them must be rejected, not delivered.
+ * board access, live room membership, and signaling-session freshness on every single
+ * frame rather than trusting a connection-time check — a call can end, a participant can
+ * leave, or a newer connection can supersede this one mid-negotiation, and the very next
+ * signal from or to them must be rejected, not delivered.
+ *
+ * <p>Validation order mirrors the full chain this phase requires: board access → active
+ * participant → current signaling session → valid target → message type/payload shape →
+ * payload size → rate limit → delivery. Any failure aborts before local delivery or
+ * Redis relay, and is logged as {@code VIDEO_SIGNAL_REJECTED} with no SDP/ICE content —
+ * only board/user/type metadata.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class VideoSignalService {
 
-    /** SDP text for a real offer/answer is typically a few KB; 64 KB is generous headroom. */
-    private static final int MAX_SDP_PAYLOAD_BYTES = 64 * 1024;
-    /** A single ICE candidate line is at most a few hundred bytes. */
-    private static final int MAX_ICE_PAYLOAD_BYTES = 8 * 1024;
+    @Value("${video.signaling.max-sdp-payload-bytes:65536}")
+    private int maxSdpPayloadBytes;
+
+    @Value("${video.signaling.max-ice-payload-bytes:8192}")
+    private int maxIcePayloadBytes;
 
     private final BoardAccessGuard boardAccessGuard;
     private final VideoRoomService videoRoomService;
@@ -45,6 +56,19 @@ public class VideoSignalService {
     private final VideoSignalBroadcaster videoSignalBroadcaster;
 
     public void relay(UUID boardId, UserPrincipal sender, VideoSignalRequest request) {
+        try {
+            doRelay(boardId, sender, request);
+            log.info("VIDEO_SIGNAL_SENT boardId={} userId={} targetUserId={} signalType={}",
+                    boardId, sender.getId(), request == null ? null : request.targetUserId(),
+                    request == null ? null : request.type());
+        } catch (VideoSignalRejectedException ex) {
+            log.warn("VIDEO_SIGNAL_REJECTED boardId={} userId={} signalType={} reason={}",
+                    boardId, sender.getId(), request == null ? null : request.type(), ex.getMessage());
+            throw ex;
+        }
+    }
+
+    private void doRelay(UUID boardId, UserPrincipal sender, VideoSignalRequest request) {
         boardAccessGuard.assertAccessible(boardId, sender.getId());
         validateRequest(request);
 
@@ -53,17 +77,20 @@ public class VideoSignalService {
             throw new VideoSignalRejectedException("Cannot send a signaling message to yourself");
         }
 
-        // Scoped to this exact board's room, so this single check simultaneously rules
-        // out a nonexistent target, a target who already left or whose call already
-        // ended, and a target who is only active in a *different* board's call.
         if (!videoRoomService.isActiveParticipant(boardId, sender.getId())) {
             throw new VideoSignalRejectedException("You are not an active participant in this video call");
         }
+        if (!videoRoomService.isCurrentSignalingSession(boardId, sender.getId(), request.signalingSessionId())) {
+            throw new VideoSignalRejectedException("Stale signaling session — reconnect and rejoin the call");
+        }
+        // Scoped to this exact board's room, so this single check simultaneously rules
+        // out a nonexistent target, a target who already left or whose call already
+        // ended, and a target who is only active in a *different* board's call.
         if (!videoRoomService.isActiveParticipant(boardId, targetUserId)) {
             throw new VideoSignalRejectedException("Target user is not an active participant in this video call");
         }
 
-        rateLimiter.assertWithinLimit(boardId, sender.getId());
+        rateLimiter.assertWithinLimit(boardId, sender.getId(), request.type());
         validatePayloadSize(request.type(), request.payload());
 
         VideoSignalMessage message = new VideoSignalMessage(
@@ -81,6 +108,9 @@ public class VideoSignalService {
         if (request.targetUserId() == null) {
             throw new VideoSignalRejectedException("A target participant is required");
         }
+        if (request.signalingSessionId() == null || request.signalingSessionId().isBlank()) {
+            throw new VideoSignalRejectedException("A signaling session id is required");
+        }
         if (request.payload() == null || request.payload().isNull()) {
             throw new VideoSignalRejectedException("Signaling payload is required");
         }
@@ -97,7 +127,7 @@ public class VideoSignalService {
     }
 
     private void validatePayloadSize(VideoSignalType type, JsonNode payload) {
-        int maxBytes = type == VideoSignalType.ICE_CANDIDATE ? MAX_ICE_PAYLOAD_BYTES : MAX_SDP_PAYLOAD_BYTES;
+        int maxBytes = type == VideoSignalType.ICE_CANDIDATE ? maxIcePayloadBytes : maxSdpPayloadBytes;
         int size;
         try {
             size = objectMapper.writeValueAsBytes(payload).length;

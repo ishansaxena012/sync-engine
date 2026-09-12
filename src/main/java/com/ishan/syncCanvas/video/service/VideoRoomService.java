@@ -6,17 +6,21 @@ import com.ishan.syncCanvas.security.user.UserPrincipal;
 import com.ishan.syncCanvas.video.dto.VideoRoomEvent;
 import com.ishan.syncCanvas.video.dto.VideoRoomEventType;
 import com.ishan.syncCanvas.video.dto.VideoRoomResponse;
+import com.ishan.syncCanvas.video.dto.VideoSignalingSession;
 import com.ishan.syncCanvas.video.exception.VideoRoomAccessDeniedException;
+import com.ishan.syncCanvas.video.exception.VideoRoomFullException;
 import com.ishan.syncCanvas.video.exception.VideoRoomNotFoundException;
 import com.ishan.syncCanvas.video.model.VideoParticipant;
 import com.ishan.syncCanvas.video.publisher.VideoEventBroadcaster;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -52,13 +56,25 @@ import java.util.UUID;
  *   <li>{@code creator} — String, set once via {@code SETNX} (atomic, first writer
  *       wins) to whichever user's join/start call is the one that actually created the
  *       room. This is who {@link #end} checks against.</li>
+ *   <li>{@code sessions} — Hash, {@code userId -> signalingSessionId} (a fresh
+ *       server-generated UUID minted on every single join call). This is the
+ *       "generation/fencing token" {@code VideoSignalService} checks each signal
+ *       against so a reconnected participant's old, superseded connection can no
+ *       longer signal. See the join() Javadoc for the multi-tab trade-off this
+ *       implies.</li>
  * </ul>
  *
  * <p>Every join/start reply — not just the public broadcast — is also sent privately to
  * the caller on {@code /user/queue/boards/{boardId}/video/state}, carrying the full
- * current roster. A repeat join from a second tab produces no public broadcast (nothing
- * changed for anyone else), so without this private reply that tab would have no way to
- * learn who is already in the call.
+ * current roster, and a second private reply on {@code
+ * /user/queue/boards/{boardId}/video/session} carrying that connection's fresh
+ * signaling session id. A repeat join from a second tab produces no public broadcast
+ * (nothing changed for anyone else), so without the private state reply that tab would
+ * have no way to learn who is already in the call.
+ *
+ * <p>All five keys share one TTL, refreshed on every legitimate join/leave, as a safety
+ * net against a room orphaned by a crashed instance that never fires a disconnect event
+ * (normal END/drain-to-zero already deletes the keys immediately and needs no TTL).
  */
 @Slf4j
 @Service
@@ -71,13 +87,36 @@ public class VideoRoomService {
     private final VideoEventBroadcaster videoEventBroadcaster;
     private final BoardAccessGuard boardAccessGuard;
 
+    @Value("${video.room.max-participants:4}")
+    private int maxParticipants;
+
+    /** Orphan safety net only — a room that ends normally is deleted immediately, well before this. */
+    @Value("${video.room.ttl-seconds:21600}")
+    private long roomTtlSeconds;
+
     // ---------------------------------------------------------------- public API
 
     /**
      * Starts or joins a board's video call — the two are the same operation. If the
      * room already has a participant, this adds the caller to it rather than creating
      * a second one; if it is empty or missing, this call creates it and the caller
-     * becomes its recorded creator.
+     * becomes its recorded creator. Rejected with {@link VideoRoomFullException} if the
+     * room is already at {@code video.room.max-participants} distinct participants —
+     * additional tabs of an already-active participant are exempt, since they do not
+     * grow the mesh.
+     *
+     * <p>Every call — a brand new join, an additional tab, or a rejoin after
+     * disconnect — mints a fresh signaling session id for this connection and makes it
+     * the sole authoritative one for this user in this room, sent back privately on
+     * {@code /user/queue/boards/{boardId}/video/session}. This is a deliberate
+     * simplification: room <em>membership</em> (whether the user is in the call at all)
+     * is entirely unaffected and still governed by the connection counter above — a
+     * second tab does not remove the first from the roster. Only <em>signaling
+     * authority</em> narrows to whichever connection joined most recently; an older tab
+     * that is still technically connected can no longer send signals once superseded.
+     * For the "2-4 participants, no SFU" scope this targets, a single user running two
+     * simultaneous WebRTC legs into the same mesh is already an unsupported edge case,
+     * so this trade-off is accepted rather than building per-tab signaling routing.
      *
      * <p>Redis failures propagate rather than being swallowed: unlike chat (where
      * Postgres is the durable source of truth and Redis is only a relay), Redis
@@ -96,18 +135,33 @@ public class VideoRoomService {
         long tabCount = incrementConnections(boardId, userId);
         VideoRoomEvent state;
         if (tabCount == 1) {
+            long roomCount = incrementRoomCount(boardId);
+            if (roomCount > maxParticipants) {
+                // Roll back both increments -- this join must not count as having
+                // happened at all; no participant record is ever written for it.
+                decrementRoomCount(boardId);
+                decrementConnections(boardId, userId);
+                log.warn("VIDEO_ROOM_FULL boardId={} userId={} maxParticipants={}", boardId, userId, maxParticipants);
+                throw new VideoRoomFullException(boardId, maxParticipants);
+            }
             VideoParticipant participant = new VideoParticipant(userId, user.getDisplayName(), Instant.now());
             hashOps().put(participantsKey(boardId), userId.toString(), writeJson(participant));
-            long roomCount = incrementRoomCount(boardId);
             VideoRoomEventType type = roomCount == 1 ? VideoRoomEventType.ROOM_STARTED : VideoRoomEventType.PARTICIPANT_JOINED;
             state = event(type, boardId, participant, currentRoster(boardId));
+            refreshRoomTtl(boardId);
             publish(state);
+            log.info("{} boardId={} userId={}",
+                    type == VideoRoomEventType.ROOM_STARTED ? "VIDEO_ROOM_STARTED" : "VIDEO_PARTICIPANT_JOINED",
+                    boardId, userId);
         } else {
             // Another tab/session for this same user already holds this room open —
             // nothing changed for anyone else, so nothing is broadcast.
             state = event(VideoRoomEventType.ROOM_STATE, boardId, null, currentRoster(boardId));
+            refreshRoomTtl(boardId);
         }
+        String signalingSessionId = rotateSignalingSession(boardId, userId);
         sendPrivateState(boardId, user.getName(), state);
+        sendPrivateSignalingSession(boardId, user.getName(), signalingSessionId);
         return state;
     }
 
@@ -177,6 +231,19 @@ public class VideoRoomService {
     }
 
     /**
+     * True if {@code signalingSessionId} is still the current one for this user in this
+     * board's room — i.e. this is still the most-recently-joined connection for them,
+     * not one superseded by a later reconnect/second tab. Used by
+     * {@code VideoSignalService} to reject stale signaling from a superseded
+     * connection; see {@link #join} for the "latest connection wins" trade-off this
+     * reflects.
+     */
+    public boolean isCurrentSignalingSession(UUID boardId, UUID userId, String signalingSessionId) {
+        String current = hashOps().get(sessionsKey(boardId), userId.toString());
+        return current != null && current.equals(signalingSessionId);
+    }
+
+    /**
      * Wipes a board's video-room state with no broadcast — called from board deletion
      * alongside {@code PresenceService}/{@code CursorService}'s own {@code
      * clearBoardState}. Silent for the same reason theirs are: {@code BOARD_CLOSED} on
@@ -218,8 +285,11 @@ public class VideoRoomService {
         if (roomCount <= 0) {
             deleteRoomKeys(boardId);
             event = event(VideoRoomEventType.ROOM_ENDED, boardId, leaving, List.of());
+            log.info("VIDEO_ROOM_ENDED boardId={} userId={}", boardId, userId);
         } else {
             event = event(VideoRoomEventType.PARTICIPANT_LEFT, boardId, leaving, currentRoster(boardId));
+            refreshRoomTtl(boardId);
+            log.info("VIDEO_PARTICIPANT_LEFT boardId={} userId={} remaining={}", boardId, userId, roomCount);
         }
         publish(event);
         return Optional.of(event);
@@ -273,7 +343,36 @@ public class VideoRoomService {
 
     private void deleteRoomKeys(UUID boardId) {
         redisTemplate.delete(List.of(
-                participantsKey(boardId), connectionsKey(boardId), countKey(boardId), creatorKey(boardId)));
+                participantsKey(boardId), connectionsKey(boardId), countKey(boardId), creatorKey(boardId),
+                sessionsKey(boardId)));
+    }
+
+    /**
+     * Server-driven TTL refresh, called only from join/leave (never from a raw client
+     * request) — purely an orphan safety net for a room whose owning instance crashed
+     * without ever firing a disconnect event. Normal teardown (explicit END, drain to
+     * zero, board deletion) deletes these keys immediately, well before this would ever
+     * matter.
+     */
+    private void refreshRoomTtl(UUID boardId) {
+        Duration ttl = Duration.ofSeconds(roomTtlSeconds);
+        redisTemplate.expire(participantsKey(boardId), ttl);
+        redisTemplate.expire(connectionsKey(boardId), ttl);
+        redisTemplate.expire(countKey(boardId), ttl);
+        redisTemplate.expire(creatorKey(boardId), ttl);
+        redisTemplate.expire(sessionsKey(boardId), ttl);
+    }
+
+    private String rotateSignalingSession(UUID boardId, UUID userId) {
+        String signalingSessionId = UUID.randomUUID().toString();
+        hashOps().put(sessionsKey(boardId), userId.toString(), signalingSessionId);
+        return signalingSessionId;
+    }
+
+    private void sendPrivateSignalingSession(UUID boardId, String principalName, String signalingSessionId) {
+        messagingTemplate.convertAndSendToUser(
+                principalName, "/queue/boards/" + boardId + "/video/session",
+                new VideoSignalingSession(signalingSessionId));
     }
 
     private VideoRoomEvent event(VideoRoomEventType type, UUID boardId, VideoParticipant participant, List<VideoParticipant> participants) {
@@ -328,5 +427,9 @@ public class VideoRoomService {
 
     private static String creatorKey(UUID boardId) {
         return "video:board:" + boardId + ":creator";
+    }
+
+    private static String sessionsKey(UUID boardId) {
+        return "video:board:" + boardId + ":sessions";
     }
 }

@@ -99,7 +99,7 @@ class VideoControllerTest {
     @Test
     void signalDelegatesToTheSignalServiceWithTheAuthenticatedSender() {
         VideoSignalRequest request = new VideoSignalRequest(
-                com.ishan.syncCanvas.video.dto.VideoSignalType.OFFER, UUID.randomUUID(), null);
+                com.ishan.syncCanvas.video.dto.VideoSignalType.OFFER, UUID.randomUUID(), "session-1", null);
 
         controller().signal(boardId, request, principal);
 
@@ -111,7 +111,7 @@ class VideoControllerTest {
         Principal anonymous = () -> "someone";
         VideoController controller = controller();
         VideoSignalRequest request = new VideoSignalRequest(
-                com.ishan.syncCanvas.video.dto.VideoSignalType.OFFER, UUID.randomUUID(), null);
+                com.ishan.syncCanvas.video.dto.VideoSignalType.OFFER, UUID.randomUUID(), "session-1", null);
 
         assertThatThrownBy(() -> controller.signal(boardId, request, anonymous))
                 .isInstanceOf(IllegalStateException.class);

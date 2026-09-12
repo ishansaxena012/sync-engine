@@ -10,10 +10,16 @@ import java.util.UUID;
  * <p>{@code payload} is opaque SDP/ICE data — the server never parses, rewrites, or
  * inspects it, only forwards it byte-for-byte to the resolved target.
  *
+ * <p>{@code signalingSessionId} must be the value most recently received on {@code
+ * /user/queue/boards/{boardId}/video/session} — the caller echoes back a value the
+ * server itself generated at join time, it does not choose one. This is the fencing
+ * token that lets the server reject signaling from a connection a later reconnect (or
+ * a second tab) has superseded.
+ *
  * <p>There is deliberately no sender field here at all: identity is always taken from
  * the authenticated STOMP session (see {@code VideoController#requireUser}), so an
  * extra {@code "senderId"} property in the raw JSON has nowhere to bind to and is
  * silently ignored by Jackson rather than trusted.
  */
-public record VideoSignalRequest(VideoSignalType type, UUID targetUserId, JsonNode payload) {
+public record VideoSignalRequest(VideoSignalType type, UUID targetUserId, String signalingSessionId, JsonNode payload) {
 }

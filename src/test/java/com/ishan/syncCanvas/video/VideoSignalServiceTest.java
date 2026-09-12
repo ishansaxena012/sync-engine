@@ -23,6 +23,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.UUID;
 
@@ -66,15 +67,22 @@ class VideoSignalServiceTest {
     private final UserPrincipal sender =
             UserPrincipal.create(User.builder().id(senderId).name("Ishan").email("ishan@example.com").build());
 
+    /** The value the sender's most recent join call would have handed back privately. */
+    private final String currentSessionId = "session-" + UUID.randomUUID();
+
     @BeforeEach
     void setUp() {
         service = new VideoSignalService(
                 boardAccessGuard, videoRoomService, rateLimiter, objectMapper, messagingTemplate, videoSignalBroadcaster);
+        ReflectionTestUtils.setField(service, "maxSdpPayloadBytes", 64 * 1024);
+        ReflectionTestUtils.setField(service, "maxIcePayloadBytes", 8 * 1024);
 
         // Default happy path: board access ok, both sender and target are active
-        // participants of this board's call. Individual tests override as needed.
+        // participants of this board's call, and the sender's session is current.
+        // Individual tests override as needed.
         lenient().when(videoRoomService.isActiveParticipant(boardId, senderId)).thenReturn(true);
         lenient().when(videoRoomService.isActiveParticipant(boardId, targetUserId)).thenReturn(true);
+        lenient().when(videoRoomService.isCurrentSignalingSession(boardId, senderId, currentSessionId)).thenReturn(true);
     }
 
     private ObjectNode sdpPayload() {
@@ -86,7 +94,7 @@ class VideoSignalServiceTest {
     }
 
     private VideoSignalRequest request(VideoSignalType type, UUID target, JsonNode payload) {
-        return new VideoSignalRequest(type, target, payload);
+        return new VideoSignalRequest(type, target, currentSessionId, payload);
     }
 
     // ---------------------------------------------------------------- signaling (1-6)
@@ -137,6 +145,7 @@ class VideoSignalServiceTest {
     void clientCannotSpoofSenderIdentityViaAnExtraJsonField() throws Exception {
         UUID spoofedSenderId = UUID.randomUUID();
         String rawJson = "{\"type\":\"OFFER\",\"targetUserId\":\"" + targetUserId
+                + "\",\"signalingSessionId\":\"" + currentSessionId
                 + "\",\"senderId\":\"" + spoofedSenderId + "\",\"payload\":{\"sdp\":\"v=0\"}}";
 
         // VideoSignalRequest has no senderId component at all, so Jackson's default
@@ -233,6 +242,57 @@ class VideoSignalServiceTest {
     // targeting tests above) -- there is no new subscription-time check introduced by
     // this class, so it is not re-tested here.
 
+    // ------------------------------------------- signaling session / reconnect (7-12, 25)
+
+    @Test
+    void requestWithoutASignalingSessionIsRejected() {
+        VideoSignalRequest noSession = new VideoSignalRequest(VideoSignalType.OFFER, targetUserId, null, sdpPayload());
+
+        assertThatThrownBy(() -> service.relay(boardId, sender, noSession))
+                .isInstanceOf(VideoSignalRejectedException.class)
+                .hasMessageContaining("signaling session id is required");
+        verifyNoInteractions(messagingTemplate, videoSignalBroadcaster);
+    }
+
+    @Test
+    void staleSignalingSessionFromASupersededConnectionIsRejected() {
+        // A newer join (reconnect, or a second tab) rotated the authoritative session --
+        // this request still carries the old, now-superseded one.
+        String staleSessionId = "stale-" + UUID.randomUUID();
+        when(videoRoomService.isCurrentSignalingSession(boardId, senderId, staleSessionId)).thenReturn(false);
+
+        VideoSignalRequest stale = new VideoSignalRequest(VideoSignalType.OFFER, targetUserId, staleSessionId, sdpPayload());
+
+        assertThatThrownBy(() -> service.relay(boardId, sender, stale))
+                .isInstanceOf(VideoSignalRejectedException.class)
+                .hasMessageContaining("Stale signaling session");
+        verifyNoInteractions(messagingTemplate, videoSignalBroadcaster);
+    }
+
+    @Test
+    void signalingWithTheCurrentSessionAfterReconnectSucceeds() {
+        // A rejoin mints a brand new session id; the client uses it going forward.
+        String freshSessionId = "fresh-" + UUID.randomUUID();
+        when(videoRoomService.isCurrentSignalingSession(boardId, senderId, freshSessionId)).thenReturn(true);
+
+        VideoSignalRequest afterReconnect = new VideoSignalRequest(VideoSignalType.OFFER, targetUserId, freshSessionId, sdpPayload());
+        service.relay(boardId, sender, afterReconnect);
+
+        verify(messagingTemplate).convertAndSendToUser(eqTargetString(), eqSignalDestination(), any(VideoSignalMessage.class));
+    }
+
+    @Test
+    void iceRestartReusesTheSameStillCurrentSessionWithoutTouchingRoomMembership() {
+        // An ICE restart is just a fresh OFFER/ANSWER over the same live connection --
+        // no new join() call, no membership change, same session id throughout.
+        service.relay(boardId, sender, request(VideoSignalType.OFFER, targetUserId, sdpPayload()));
+        service.relay(boardId, sender, request(VideoSignalType.ANSWER, targetUserId, sdpPayload()));
+
+        verify(videoRoomService, never()).join(any(), any());
+        verify(messagingTemplate, org.mockito.Mockito.times(2))
+                .convertAndSendToUser(eqTargetString(), eqSignalDestination(), any(VideoSignalMessage.class));
+    }
+
     // ---------------------------------------------------------------- redis (15-17)
 
     @Test
@@ -262,7 +322,7 @@ class VideoSignalServiceTest {
 
     @Test
     void requestWithNoTypeIsRejected() {
-        VideoSignalRequest malformed = new VideoSignalRequest(null, targetUserId, sdpPayload());
+        VideoSignalRequest malformed = new VideoSignalRequest(null, targetUserId, currentSessionId, sdpPayload());
 
         assertThatThrownBy(() -> service.relay(boardId, sender, malformed))
                 .isInstanceOf(VideoSignalRejectedException.class)
@@ -378,15 +438,16 @@ class VideoSignalServiceTest {
     // ---------------------------------------------------------------- rate limiting
 
     @Test
-    void everyRelayIsRateLimitedPerSenderPerBoard() {
+    void everyRelayIsRateLimitedPerSenderPerBoardAndSignalType() {
         service.relay(boardId, sender, request(VideoSignalType.OFFER, targetUserId, sdpPayload()));
 
-        verify(rateLimiter).assertWithinLimit(boardId, senderId);
+        verify(rateLimiter).assertWithinLimit(boardId, senderId, VideoSignalType.OFFER);
     }
 
     @Test
     void rateLimitedSenderIsRejectedWithoutForwarding() {
-        doThrow(new VideoSignalRejectedException("slow down")).when(rateLimiter).assertWithinLimit(boardId, senderId);
+        doThrow(new VideoSignalRejectedException("slow down"))
+                .when(rateLimiter).assertWithinLimit(boardId, senderId, VideoSignalType.OFFER);
 
         assertThatThrownBy(() -> service.relay(boardId, sender, request(VideoSignalType.OFFER, targetUserId, sdpPayload())))
                 .isInstanceOf(VideoSignalRejectedException.class);
