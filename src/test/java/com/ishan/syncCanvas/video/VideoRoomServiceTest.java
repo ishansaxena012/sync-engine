@@ -1,0 +1,466 @@
+package com.ishan.syncCanvas.video;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.ishan.syncCanvas.collaboration.exception.BoardAccessDeniedException;
+import com.ishan.syncCanvas.collaboration.service.BoardAccessGuard;
+import com.ishan.syncCanvas.security.user.UserPrincipal;
+import com.ishan.syncCanvas.user.entity.User;
+import com.ishan.syncCanvas.video.dto.VideoRoomEvent;
+import com.ishan.syncCanvas.video.dto.VideoRoomEventType;
+import com.ishan.syncCanvas.video.dto.VideoRoomResponse;
+import com.ishan.syncCanvas.video.exception.VideoRoomAccessDeniedException;
+import com.ishan.syncCanvas.video.exception.VideoRoomNotFoundException;
+import com.ishan.syncCanvas.video.model.VideoParticipant;
+import com.ishan.syncCanvas.video.publisher.VideoEventBroadcaster;
+import com.ishan.syncCanvas.video.service.VideoRoomService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.core.HashOperations;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class VideoRoomServiceTest {
+
+    @Mock
+    private StringRedisTemplate redisTemplate;
+    @Mock
+    private ValueOperations<String, String> valueOperations;
+    @Mock
+    private HashOperations<String, String, String> hashOperations;
+    @Mock
+    private SimpMessagingTemplate messagingTemplate;
+    @Mock
+    private VideoEventBroadcaster videoEventBroadcaster;
+    @Mock
+    private BoardAccessGuard boardAccessGuard;
+
+    private VideoRoomService videoRoomService;
+    private ObjectMapper objectMapper;
+
+    private final UUID boardId = UUID.randomUUID();
+    private final UUID userId = UUID.randomUUID();
+    private final UUID otherUserId = UUID.randomUUID();
+
+    private String participantsKey;
+    private String connectionsKey;
+    private String countKey;
+    private String creatorKey;
+
+    /**
+     * A bare mock of the participants hash would report itself as empty forever,
+     * regardless of what the service just put into it — so every test that cares what
+     * currentRoster()/readParticipant() sees afterward backs put/entries/get/delete for
+     * the participants key with this real in-memory map instead, the same way a real
+     * Redis hash would behave across calls within one test.
+     */
+    private final Map<String, String> participantsBacking = new LinkedHashMap<>();
+
+    @BeforeEach
+    void setUp() {
+        lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        lenient().when(redisTemplate.<String, String>opsForHash()).thenReturn(hashOperations);
+
+        objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+        videoRoomService = new VideoRoomService(
+                redisTemplate, objectMapper, messagingTemplate, videoEventBroadcaster, boardAccessGuard);
+
+        participantsKey = "video:board:" + boardId + ":participants";
+        connectionsKey = "video:board:" + boardId + ":connections";
+        countKey = "video:board:" + boardId + ":count";
+        creatorKey = "video:board:" + boardId + ":creator";
+
+        lenient().doAnswer(inv -> {
+            participantsBacking.put(inv.getArgument(1), inv.getArgument(2));
+            return null;
+        }).when(hashOperations).put(eq(participantsKey), anyString(), anyString());
+        lenient().when(hashOperations.entries(participantsKey))
+                .thenAnswer(inv -> new LinkedHashMap<>(participantsBacking));
+        lenient().when(hashOperations.get(eq(participantsKey), anyString()))
+                .thenAnswer(inv -> participantsBacking.get((String) inv.getArgument(1)));
+        lenient().when(hashOperations.delete(eq(participantsKey), anyString())).thenAnswer(inv -> {
+            Object removed = participantsBacking.remove((String) inv.getArgument(1));
+            return removed == null ? 0L : 1L;
+        });
+    }
+
+    private UserPrincipal principal(UUID id, String name) {
+        return UserPrincipal.create(User.builder().id(id).name(name).email(name + "@example.com").build());
+    }
+
+    private UserPrincipal caller() {
+        return principal(userId, "Ishan");
+    }
+
+    /** Seeds the participants-hash fixture as if the given user had already joined. */
+    private void seedExistingParticipant(UUID id, String name) throws Exception {
+        participantsBacking.put(id.toString(),
+                objectMapper.writeValueAsString(new VideoParticipant(id, name, Instant.now())));
+    }
+
+    /** Mocks a genuine first-ever join: empty room, first tab, first participant. */
+    private void mockGenuineFirstJoin() {
+        when(hashOperations.increment(connectionsKey, userId.toString(), 1L)).thenReturn(1L);
+        when(valueOperations.increment(countKey)).thenReturn(1L);
+    }
+
+    // ---------------------------------------------------------------- room lifecycle
+
+    @Test
+    void startCreatesARoomAndAddsTheCallerAsCreator() {
+        mockGenuineFirstJoin();
+
+        VideoRoomEvent event = videoRoomService.join(boardId, caller());
+
+        assertThat(event.type()).isEqualTo(VideoRoomEventType.ROOM_STARTED);
+        assertThat(event.boardId()).isEqualTo(boardId);
+        verify(valueOperations).setIfAbsent(creatorKey, userId.toString());
+        verify(hashOperations).put(eq(participantsKey), eq(userId.toString()), anyString());
+    }
+
+    @Test
+    void startingTwiceDoesNotCreateASecondRoom() {
+        // setIfAbsent is inherently idempotent (a no-op once the key exists) — this
+        // asserts the service always attempts it rather than only on some conditional
+        // "first time" path, which is what makes concurrent starts race-free.
+        mockGenuineFirstJoin();
+        when(hashOperations.increment(connectionsKey, otherUserId.toString(), 1L)).thenReturn(1L);
+        when(valueOperations.increment(countKey)).thenReturn(1L).thenReturn(2L);
+
+        videoRoomService.join(boardId, caller());
+        videoRoomService.join(boardId, principal(otherUserId, "Priya"));
+
+        verify(valueOperations, times(2)).setIfAbsent(eq(creatorKey), anyString());
+    }
+
+    @Test
+    void startAutomaticallyAddsTheCallerAsAParticipant() {
+        mockGenuineFirstJoin();
+
+        VideoRoomEvent event = videoRoomService.join(boardId, caller());
+
+        assertThat(event.participant().userId()).isEqualTo(userId);
+        assertThat(event.participant().userName()).isEqualTo("Ishan");
+        assertThat(event.participants()).extracting(VideoParticipant::userId).containsExactly(userId);
+    }
+
+    @Test
+    void joinAddsAParticipantToAnAlreadyActiveRoom() throws Exception {
+        seedExistingParticipant(userId, "Ishan");
+        when(hashOperations.increment(connectionsKey, otherUserId.toString(), 1L)).thenReturn(1L);
+        when(valueOperations.increment(countKey)).thenReturn(2L); // one participant already present
+
+        VideoRoomEvent event = videoRoomService.join(boardId, principal(otherUserId, "Priya"));
+
+        assertThat(event.type()).isEqualTo(VideoRoomEventType.PARTICIPANT_JOINED);
+    }
+
+    @Test
+    void multipleParticipantsJoinTheSameRoomNotSeparateOnes() {
+        mockGenuineFirstJoin();
+        videoRoomService.join(boardId, caller());
+
+        when(hashOperations.increment(connectionsKey, otherUserId.toString(), 1L)).thenReturn(1L);
+        when(valueOperations.increment(countKey)).thenReturn(2L);
+        VideoRoomEvent second = videoRoomService.join(boardId, principal(otherUserId, "Priya"));
+
+        // Both joins target the same board-scoped keys, so the resulting roster
+        // contains both — a "second room" is structurally impossible here.
+        assertThat(second.type()).isEqualTo(VideoRoomEventType.PARTICIPANT_JOINED);
+        assertThat(second.participants()).extracting(VideoParticipant::userId)
+                .containsExactlyInAnyOrder(userId, otherUserId);
+    }
+
+    @Test
+    void repeatJoinFromASecondTabDoesNotRebroadcastOrDuplicateTheParticipant() {
+        when(hashOperations.increment(connectionsKey, userId.toString(), 1L)).thenReturn(2L); // already had one tab
+
+        VideoRoomEvent event = videoRoomService.join(boardId, caller());
+
+        assertThat(event.type()).isEqualTo(VideoRoomEventType.ROOM_STATE);
+        verify(hashOperations, never()).put(eq(participantsKey), anyString(), anyString());
+        verifyNoInteractions(videoEventBroadcaster);
+        verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
+        // The joining tab still learns the current state, privately.
+        verify(messagingTemplate).convertAndSendToUser(
+                eq(userId.toString()), eq("/queue/boards/" + boardId + "/video/state"), any(VideoRoomEvent.class));
+    }
+
+    @Test
+    void leaveRemovesTheParticipantWhenOthersRemain() throws Exception {
+        seedExistingParticipant(userId, "Ishan");
+        when(redisTemplate.hasKey(countKey)).thenReturn(true);
+        when(hashOperations.increment(connectionsKey, userId.toString(), -1L)).thenReturn(0L);
+        when(valueOperations.decrement(countKey)).thenReturn(1L); // one participant still left
+
+        Optional<VideoRoomEvent> event = videoRoomService.leave(boardId, caller());
+
+        assertThat(event).isPresent();
+        assertThat(event.get().type()).isEqualTo(VideoRoomEventType.PARTICIPANT_LEFT);
+        assertThat(event.get().participant().userId()).isEqualTo(userId);
+        assertThat(participantsBacking).doesNotContainKey(userId.toString());
+        // The room itself is untouched — someone else is still in it.
+        verify(redisTemplate, never()).delete(anyList());
+    }
+
+    @Test
+    void lastParticipantLeavingRemovesTheRoom() throws Exception {
+        seedExistingParticipant(userId, "Ishan");
+        when(redisTemplate.hasKey(countKey)).thenReturn(true);
+        when(hashOperations.increment(connectionsKey, userId.toString(), -1L)).thenReturn(0L);
+        when(valueOperations.decrement(countKey)).thenReturn(0L);
+
+        Optional<VideoRoomEvent> event = videoRoomService.leave(boardId, caller());
+
+        assertThat(event).isPresent();
+        assertThat(event.get().type()).isEqualTo(VideoRoomEventType.ROOM_ENDED);
+        assertThat(event.get().participants()).isEmpty();
+        verify(redisTemplate).delete(List.of(participantsKey, connectionsKey, countKey, creatorKey));
+    }
+
+    @Test
+    void leaveIsANoOpWhenTheRoomNoLongerExists() {
+        when(redisTemplate.hasKey(countKey)).thenReturn(false);
+
+        Optional<VideoRoomEvent> event = videoRoomService.leave(boardId, caller());
+
+        assertThat(event).isEmpty();
+        verify(hashOperations, never()).increment(anyString(), anyString(), anyLong());
+        verifyNoInteractions(videoEventBroadcaster);
+        verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
+    }
+
+    @Test
+    void endRemovesTheEntireRoom() {
+        when(valueOperations.get(creatorKey)).thenReturn(userId.toString());
+
+        VideoRoomEvent event = videoRoomService.end(boardId, caller());
+
+        assertThat(event.type()).isEqualTo(VideoRoomEventType.ROOM_ENDED);
+        assertThat(event.participants()).isEmpty();
+        verify(redisTemplate).delete(List.of(participantsKey, connectionsKey, countKey, creatorKey));
+    }
+
+    @Test
+    void onlyTheCreatorCanEndTheRoom() {
+        when(valueOperations.get(creatorKey)).thenReturn(otherUserId.toString());
+
+        assertThatThrownBy(() -> videoRoomService.end(boardId, caller()))
+                .isInstanceOf(VideoRoomAccessDeniedException.class);
+
+        verify(redisTemplate, never()).delete(anyList());
+        verifyNoInteractions(videoEventBroadcaster);
+    }
+
+    @Test
+    void endingANonExistentRoomFails() {
+        when(valueOperations.get(creatorKey)).thenReturn(null);
+
+        assertThatThrownBy(() -> videoRoomService.end(boardId, caller()))
+                .isInstanceOf(VideoRoomNotFoundException.class);
+    }
+
+    // ---------------------------------------------------------------- authorization
+
+    @Test
+    void unauthorizedUserCannotStartOrJoin() {
+        doThrow(new BoardAccessDeniedException("no access")).when(boardAccessGuard).assertAccessible(boardId, userId);
+
+        assertThatThrownBy(() -> videoRoomService.join(boardId, caller()))
+                .isInstanceOf(BoardAccessDeniedException.class);
+
+        verifyNoInteractions(hashOperations, valueOperations, videoEventBroadcaster, messagingTemplate);
+    }
+
+    @Test
+    void unauthorizedUserCannotInspectRoomState() {
+        doThrow(new BoardAccessDeniedException("no access")).when(boardAccessGuard).assertAccessible(boardId, userId);
+
+        assertThatThrownBy(() -> videoRoomService.getRoomState(boardId, userId))
+                .isInstanceOf(BoardAccessDeniedException.class);
+
+        verify(hashOperations, never()).entries(anyString());
+    }
+
+    @Test
+    void cannotEndSomeoneElsesRoom() {
+        when(valueOperations.get(creatorKey)).thenReturn(otherUserId.toString());
+
+        assertThatThrownBy(() -> videoRoomService.end(boardId, caller()))
+                .isInstanceOf(VideoRoomAccessDeniedException.class);
+    }
+
+    @Test
+    void participantIdentityAlwaysComesFromTheAuthenticatedPrincipalNeverFromInput() {
+        // There is no client-suppliable field anywhere in join()'s signature besides
+        // boardId and the server-attached UserPrincipal — this pins that down.
+        mockGenuineFirstJoin();
+
+        VideoRoomEvent event = videoRoomService.join(boardId, principal(userId, "Ishan"));
+
+        assertThat(event.participant().userId()).isEqualTo(userId);
+        assertThat(event.participant().userName()).isEqualTo("Ishan");
+    }
+
+    // ---------------------------------------------------------------- concurrency (via atomic op return values)
+
+    @Test
+    void roomStartedDecisionComesFromTheAtomicCounterNotFromHlen() {
+        // Two callers racing to be "first" would both see the participants hash as
+        // empty at the instant they check it; only the INCR return value is guaranteed
+        // unique per caller, which is why the service must use it (and does — verified
+        // by never calling size()/entries() to decide the event type).
+        when(hashOperations.increment(connectionsKey, userId.toString(), 1L)).thenReturn(1L);
+        when(valueOperations.increment(countKey)).thenReturn(1L);
+        VideoRoomEvent first = videoRoomService.join(boardId, caller());
+
+        when(hashOperations.increment(connectionsKey, otherUserId.toString(), 1L)).thenReturn(1L);
+        when(valueOperations.increment(countKey)).thenReturn(2L);
+        VideoRoomEvent second = videoRoomService.join(boardId, principal(otherUserId, "Priya"));
+
+        assertThat(first.type()).isEqualTo(VideoRoomEventType.ROOM_STARTED);
+        assertThat(second.type()).isEqualTo(VideoRoomEventType.PARTICIPANT_JOINED);
+    }
+
+    @Test
+    void concurrentLeaveAndJoinBothApplyWithoutLosingEitherUpdate() throws Exception {
+        // A joins while B leaves: each operates on its own connections-hash field and
+        // the shared count key only ever moves by the atomic amount each call applies,
+        // regardless of interleaving.
+        seedExistingParticipant(otherUserId, "Priya");
+        when(redisTemplate.hasKey(countKey)).thenReturn(true);
+        when(hashOperations.increment(connectionsKey, otherUserId.toString(), -1L)).thenReturn(0L);
+        when(valueOperations.decrement(countKey)).thenReturn(1L);
+
+        when(hashOperations.increment(connectionsKey, userId.toString(), 1L)).thenReturn(1L);
+        when(valueOperations.increment(countKey)).thenReturn(2L);
+
+        Optional<VideoRoomEvent> left = videoRoomService.leave(boardId, principal(otherUserId, "Priya"));
+        VideoRoomEvent joined = videoRoomService.join(boardId, caller());
+
+        assertThat(left).isPresent();
+        assertThat(left.get().type()).isEqualTo(VideoRoomEventType.PARTICIPANT_LEFT);
+        assertThat(joined.type()).isEqualTo(VideoRoomEventType.PARTICIPANT_JOINED);
+        assertThat(joined.participants()).extracting(VideoParticipant::userId).containsExactly(userId);
+    }
+
+    // ---------------------------------------------------------------- disconnect / multi-tab
+
+    @Test
+    void disconnectRemovalUsesTheSameSafeRemovalPathAsExplicitLeave() throws Exception {
+        seedExistingParticipant(userId, "Ishan");
+        when(redisTemplate.hasKey(countKey)).thenReturn(true);
+        when(hashOperations.increment(connectionsKey, userId.toString(), -1L)).thenReturn(0L);
+        when(valueOperations.decrement(countKey)).thenReturn(0L);
+
+        videoRoomService.removeParticipantOnDisconnect(boardId, userId);
+
+        verify(redisTemplate).delete(List.of(participantsKey, connectionsKey, countKey, creatorKey));
+        // No board-access check for a disconnect-triggered cleanup — access being
+        // revoked must never block removing stale membership.
+        verifyNoInteractions(boardAccessGuard);
+    }
+
+    @Test
+    void oneTabDisconnectingDoesNotRemoveAUserWithAnotherTabStillInTheCall() {
+        when(redisTemplate.hasKey(countKey)).thenReturn(true);
+        when(hashOperations.increment(connectionsKey, userId.toString(), -1L)).thenReturn(1L); // one tab remains
+
+        videoRoomService.removeParticipantOnDisconnect(boardId, userId);
+
+        verify(hashOperations, never()).delete(eq(participantsKey), anyString());
+        verify(valueOperations, never()).decrement(countKey);
+        verifyNoInteractions(videoEventBroadcaster);
+    }
+
+    // ---------------------------------------------------------------- board deletion
+
+    @Test
+    void clearBoardStateDeletesAllVideoKeysSilently() {
+        videoRoomService.clearBoardState(boardId);
+
+        verify(redisTemplate).delete(List.of(participantsKey, connectionsKey, countKey, creatorKey));
+        verifyNoInteractions(videoEventBroadcaster, messagingTemplate);
+    }
+
+    @Test
+    void clearBoardStateSwallowsRedisFailuresRatherThanPropagating() {
+        doThrow(new RuntimeException("redis down")).when(redisTemplate).delete(anyList());
+
+        videoRoomService.clearBoardState(boardId); // must not throw — board deletion cannot be aborted by this
+    }
+
+    // ---------------------------------------------------------------- Redis failure handling
+
+    @Test
+    void joinDoesNotSwallowARedisFailure() {
+        when(hashOperations.increment(anyString(), anyString(), eq(1L)))
+                .thenThrow(new RedisConnectionFailureException("down"));
+
+        assertThatThrownBy(() -> videoRoomService.join(boardId, caller()))
+                .isInstanceOf(RedisConnectionFailureException.class);
+
+        // Nothing was broadcast for a join that did not actually succeed.
+        verifyNoInteractions(videoEventBroadcaster);
+    }
+
+    @Test
+    void leaveDoesNotSwallowARedisFailure() {
+        when(redisTemplate.hasKey(countKey)).thenReturn(true);
+        when(hashOperations.increment(connectionsKey, userId.toString(), -1L))
+                .thenThrow(new RedisConnectionFailureException("down"));
+
+        assertThatThrownBy(() -> videoRoomService.leave(boardId, caller()))
+                .isInstanceOf(RedisConnectionFailureException.class);
+    }
+
+    // ---------------------------------------------------------------- REST snapshot
+
+    @Test
+    void getRoomStateReportsInactiveWhenNoCallExists() {
+        VideoRoomResponse response = videoRoomService.getRoomState(boardId, userId);
+
+        assertThat(response.active()).isFalse();
+        assertThat(response.participants()).isEmpty();
+    }
+
+    @Test
+    void getRoomStateReportsActiveWithTheCurrentRosterWhenACallIsRunning() throws Exception {
+        seedExistingParticipant(userId, "Ishan");
+        seedExistingParticipant(otherUserId, "Priya");
+
+        VideoRoomResponse response = videoRoomService.getRoomState(boardId, userId);
+
+        assertThat(response.active()).isTrue();
+        assertThat(response.participants()).extracting(VideoParticipant::userId)
+                .containsExactlyInAnyOrder(userId, otherUserId);
+    }
+}

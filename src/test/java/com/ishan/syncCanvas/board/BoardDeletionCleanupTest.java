@@ -13,6 +13,7 @@ import com.ishan.syncCanvas.collaboration.lifecycle.BoardClosedEvent;
 import com.ishan.syncCanvas.collaboration.lifecycle.BoardClosureBroadcaster;
 import com.ishan.syncCanvas.collaboration.persistence.DirtySessionTracker;
 import com.ishan.syncCanvas.collaboration.presence.PresenceService;
+import com.ishan.syncCanvas.video.service.VideoRoomService;
 import com.ishan.syncCanvas.collaboration.session.BoardSessionManager;
 import com.ishan.syncCanvas.collaboration.sync.OperationSequenceService;
 import com.ishan.syncCanvas.collaboration.undo.BoardUndoCursorRepository;
@@ -64,6 +65,8 @@ class BoardDeletionCleanupTest {
     @Mock
     private PresenceService presenceService;
     @Mock
+    private VideoRoomService videoRoomService;
+    @Mock
     private CursorService cursorService;
     @Mock
     private BoardClosureBroadcaster boardClosureBroadcaster;
@@ -93,6 +96,7 @@ class BoardDeletionCleanupTest {
         verify(operationSequenceService).clearBoardState(boardId);
         verify(presenceService).clearBoardState(boardId);
         verify(cursorService).clearBoardState(boardId);
+        verify(videoRoomService).clearBoardState(boardId);
         verify(boardSessionManager).remove(boardId);
         verify(dirtySessionTracker).clearDirty(boardId);
         verify(canvasObjectRepository).deleteByBoardId(boardId);
@@ -116,7 +120,7 @@ class BoardDeletionCleanupTest {
 
         verifyNoInteractions(operationSequenceService, canvasObjectRepository, boardSessionManager,
                 boardEventRepository, boardSnapshotRepository, boardUndoStackEntryRepository,
-                boardUndoCursorRepository, presenceService, cursorService, boardClosureBroadcaster,
+                boardUndoCursorRepository, presenceService, cursorService, videoRoomService, boardClosureBroadcaster,
                 messagingTemplate, chatMessageRepository);
     }
 }

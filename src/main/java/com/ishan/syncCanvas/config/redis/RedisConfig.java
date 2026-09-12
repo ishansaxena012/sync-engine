@@ -11,6 +11,7 @@ import com.ishan.syncCanvas.collaboration.cursor.CursorEventSubscriber;
 import com.ishan.syncCanvas.collaboration.lifecycle.BoardClosureSubscriber;
 import com.ishan.syncCanvas.collaboration.presence.PresenceEventSubscriber;
 import com.ishan.syncCanvas.collaboration.publisher.RedisOperationSubscriber;
+import com.ishan.syncCanvas.video.publisher.VideoEventSubscriber;
 
 @Configuration
 public class RedisConfig {
@@ -20,6 +21,7 @@ public class RedisConfig {
     public static final String PRESENCE_EVENTS_CHANNEL = "syncCanvas:presence-events";
     public static final String BOARD_CLOSURE_CHANNEL = "syncCanvas:board-closure";
     public static final String CHAT_EVENTS_CHANNEL = "syncCanvas:chat-events";
+    public static final String VIDEO_EVENTS_CHANNEL = "syncCanvas:video-events";
 
     @Bean
     public ChannelTopic boardOperationsTopic() {
@@ -47,6 +49,12 @@ public class RedisConfig {
         return new ChannelTopic(CHAT_EVENTS_CHANNEL);
     }
 
+    /** Video room lifecycle/membership events get their own channel too — never mixed with chat, cursor, presence or canvas operations. */
+    @Bean
+    public ChannelTopic videoEventsTopic() {
+        return new ChannelTopic(VIDEO_EVENTS_CHANNEL);
+    }
+
     @Bean
     public RedisMessageListenerContainer redisMessageListenerContainer(
             RedisConnectionFactory connectionFactory,
@@ -59,7 +67,9 @@ public class RedisConfig {
             BoardClosureSubscriber boardClosureSubscriber,
             ChannelTopic boardClosureTopic,
             ChatEventSubscriber chatEventSubscriber,
-            ChannelTopic chatEventsTopic) {
+            ChannelTopic chatEventsTopic,
+            VideoEventSubscriber videoEventSubscriber,
+            ChannelTopic videoEventsTopic) {
 
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();
         container.setConnectionFactory(connectionFactory);
@@ -68,6 +78,7 @@ public class RedisConfig {
         container.addMessageListener(presenceEventSubscriber, presenceEventsTopic);
         container.addMessageListener(boardClosureSubscriber, boardClosureTopic);
         container.addMessageListener(chatEventSubscriber, chatEventsTopic);
+        container.addMessageListener(videoEventSubscriber, videoEventsTopic);
         return container;
     }
 }

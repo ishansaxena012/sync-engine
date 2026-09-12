@@ -10,6 +10,7 @@ import com.ishan.syncCanvas.board.repository.BoardRepository;
 import com.ishan.syncCanvas.board.service.BoardService;
 import com.ishan.syncCanvas.canvas.repository.CanvasObjectRepository;
 import com.ishan.syncCanvas.chat.repository.ChatMessageRepository;
+import com.ishan.syncCanvas.video.service.VideoRoomService;
 import com.ishan.syncCanvas.collaboration.cursor.CursorService;
 import com.ishan.syncCanvas.collaboration.event.BoardEventRepository;
 import com.ishan.syncCanvas.collaboration.event.BoardSnapshotRepository;
@@ -55,6 +56,7 @@ public class BoardServiceImpl implements BoardService {
     private final BoardUndoStackEntryRepository boardUndoStackEntryRepository;
     private final BoardUndoCursorRepository boardUndoCursorRepository;
     private final PresenceService presenceService;
+    private final VideoRoomService videoRoomService;
     private final CursorService cursorService;
     private final BoardClosureBroadcaster boardClosureBroadcaster;
     private final SimpMessagingTemplate messagingTemplate;
@@ -132,6 +134,7 @@ public class BoardServiceImpl implements BoardService {
         operationSequenceService.clearBoardState(id);
         presenceService.clearBoardState(id);
         cursorService.clearBoardState(id);
+        videoRoomService.clearBoardState(id);
 
         // Explicit deletes alongside the ON DELETE CASCADE foreign keys, so the durable
         // history is removed even on a schema where the cascade isn't present.
