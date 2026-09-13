@@ -1,6 +1,5 @@
 package com.ishan.syncCanvas.video.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ishan.syncCanvas.collaboration.service.BoardAccessGuard;
 import com.ishan.syncCanvas.security.user.UserPrincipal;
@@ -112,10 +111,13 @@ public class VideoSignalService {
         if (request.targetUserId() == null) {
             throw new VideoSignalRejectedException("A target participant is required");
         }
-        if (request.payload() == null || request.payload().isNull()) {
+        if (request.payload() == null) {
             throw new VideoSignalRejectedException("Signaling payload is required");
         }
-        if (!request.payload().isObject()) {
+        // A JSON object deserializes to a Map under Object-typed binding (see
+        // VideoSignalRequest's Javadoc) -- anything else (a bare string, number, array)
+        // is not a valid SDP/ICE payload shape.
+        if (!(request.payload() instanceof java.util.Map)) {
             throw new VideoSignalRejectedException("Signaling payload must be a JSON object");
         }
     }
@@ -127,7 +129,7 @@ public class VideoSignalService {
                 message);
     }
 
-    private void validatePayloadSize(VideoSignalType type, JsonNode payload) {
+    private void validatePayloadSize(VideoSignalType type, Object payload) {
         int maxBytes = type == VideoSignalType.ICE_CANDIDATE ? maxIcePayloadBytes : maxSdpPayloadBytes;
         int size;
         try {

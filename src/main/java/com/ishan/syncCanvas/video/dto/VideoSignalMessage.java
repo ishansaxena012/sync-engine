@@ -1,7 +1,6 @@
 package com.ishan.syncCanvas.video.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.JsonNode;
 
 import java.util.UUID;
 
@@ -14,13 +13,14 @@ import java.util.UUID;
  * <p>{@code fromUserId} and {@code timestamp} are always server-derived from the
  * authenticated caller and clock at forward time, never taken from the inbound
  * {@link VideoSignalRequest}. Exactly one of {@code sdp}/{@code candidate} is present,
- * mirroring whichever the sender populated.
+ * mirroring whichever the sender populated. See {@link VideoSignalRequest}'s Javadoc for
+ * why these are plain {@code Object} rather than a Jackson tree type.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record VideoSignalMessage(
         VideoSignalType type,
         UUID fromUserId,
-        JsonNode sdp,
-        JsonNode candidate,
+        Object sdp,
+        Object candidate,
         long timestamp) {
 }

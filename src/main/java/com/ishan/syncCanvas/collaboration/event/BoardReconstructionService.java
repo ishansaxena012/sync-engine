@@ -2,6 +2,7 @@ package com.ishan.syncCanvas.collaboration.event;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ishan.syncCanvas.canvas.entity.CanvasObject;
+import com.ishan.syncCanvas.collaboration.exception.ObjectNotFoundException;
 import com.ishan.syncCanvas.collaboration.operation.Operation;
 import com.ishan.syncCanvas.collaboration.processor.ApplyMode;
 import com.ishan.syncCanvas.collaboration.processor.OperationProcessor;
@@ -71,7 +72,21 @@ public class BoardReconstructionService {
                         boardId, expected, event.getSequence());
                 return Optional.empty();
             }
-            operationProcessor.apply(deserialize(event), replay, ApplyMode.REPLAY);
+            try {
+                operationProcessor.apply(deserialize(event), replay, ApplyMode.REPLAY);
+            } catch (ObjectNotFoundException ex) {
+                // A mutation on an object that no longer exists by this point in history.
+                // This can legitimately happen when a board session is reloaded from
+                // current-state (canvas_objects) after an abrupt shutdown lost an
+                // already-event-logged delete's effect on that table -- a later session
+                // then "resurrects" the object and lets further live operations on it
+                // commit, even though the event log already recorded its deletion. The
+                // operation's effect is moot for an object that is gone either way, so it
+                // is skipped rather than permanently blocking every future snapshot of
+                // this board on one orphaned historical event.
+                log.warn("Board {} event {} (sequence {}) targets an object no longer present during replay; skipping",
+                        boardId, event.getId(), event.getSequence(), ex);
+            }
             expected++;
         }
 

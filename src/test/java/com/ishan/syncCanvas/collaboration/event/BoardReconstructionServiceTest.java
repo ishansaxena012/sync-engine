@@ -5,6 +5,7 @@ import com.ishan.syncCanvas.canvas.domain.CanvasObjectType;
 import com.ishan.syncCanvas.canvas.dto.CreateCanvasObjectRequest;
 import com.ishan.syncCanvas.canvas.entity.CanvasObject;
 import com.ishan.syncCanvas.collaboration.operation.CreateObjectOperation;
+import com.ishan.syncCanvas.collaboration.operation.DeleteObjectOperation;
 import com.ishan.syncCanvas.collaboration.operation.MoveObjectOperation;
 import com.ishan.syncCanvas.collaboration.operation.Operation;
 import com.ishan.syncCanvas.collaboration.operation.RotateObjectOperation;
@@ -89,6 +90,11 @@ class BoardReconstructionServiceTest {
     private BoardEvent rotateEvent(long sequence, double rotation, Long expectedVersion) throws Exception {
         return event(sequence, new RotateObjectOperation(UUID.randomUUID(), boardId, userId, Instant.now(),
                 objectId, expectedVersion, rotation));
+    }
+
+    private BoardEvent deleteEvent(long sequence, Long expectedVersion) throws Exception {
+        return event(sequence, new DeleteObjectOperation(UUID.randomUUID(), boardId, userId,
+                objectId, expectedVersion, Instant.now()));
     }
 
     private BoardEvent event(long sequence, Operation op) throws Exception {
@@ -187,6 +193,26 @@ class BoardReconstructionServiceTest {
                 .thenReturn(List.of(e1, moveEvent(2, 1, 1, null)));
 
         assertThat(service.reconstruct(boardId, 3)).isEmpty();
+    }
+
+    @Test
+    void anEventTargetingAnAlreadyDeletedObjectIsSkippedRatherThanAbortingReconstruction() throws Exception {
+        // Mirrors a real production scenario: a board session reloaded from
+        // current-state (canvas_objects) after an abrupt shutdown resurrected an object
+        // the event log had already recorded as deleted, letting a further live MOVE on
+        // it commit durably. Reconstruction must tolerate that orphaned historical event
+        // rather than permanently refusing to ever snapshot this board again.
+        BoardEvent e1 = createEvent(1);
+        BoardEvent deleted = deleteEvent(2, 1L);
+        BoardEvent orphanedMove = moveEvent(3, 999, 999, null);
+        noSnapshotAndLogStartsAt(1, e1);
+        when(eventRepository.findByBoardIdAndSequenceGreaterThanAndSequenceLessThanEqualOrderBySequenceAsc(boardId, 0L, 3L))
+                .thenReturn(List.of(e1, deleted, orphanedMove));
+
+        Optional<List<CanvasObject>> result = service.reconstruct(boardId, 3);
+
+        assertThat(result).isPresent();
+        assertThat(result.get()).isEmpty();
     }
 
     @Test

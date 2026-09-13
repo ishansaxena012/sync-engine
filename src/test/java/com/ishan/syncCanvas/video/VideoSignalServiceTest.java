@@ -1,8 +1,6 @@
 package com.ishan.syncCanvas.video;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.ishan.syncCanvas.collaboration.exception.BoardAccessDeniedException;
 import com.ishan.syncCanvas.collaboration.service.BoardAccessGuard;
 import com.ishan.syncCanvas.security.user.UserPrincipal;
@@ -25,6 +23,8 @@ import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -85,15 +85,22 @@ class VideoSignalServiceTest {
         lenient().when(videoRoomService.isCurrentSignalingSession(boardId, senderId, currentSessionId)).thenReturn(true);
     }
 
-    private ObjectNode sdpPayload() {
-        return objectMapper.createObjectNode().put("sdp", "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\n...");
+    // A JSON object deserializes to a Map<String, Object> under Object-typed binding
+    // (see VideoSignalRequest's Javadoc) -- these mirror that real runtime shape rather
+    // than a Jackson tree type.
+    private Map<String, Object> sdpPayload() {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("sdp", "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\n...");
+        return payload;
     }
 
-    private ObjectNode icePayload() {
-        return objectMapper.createObjectNode().put("candidate", "candidate:1 1 UDP 2130706431 10.0.0.1 54400 typ host");
+    private Map<String, Object> icePayload() {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("candidate", "candidate:1 1 UDP 2130706431 10.0.0.1 54400 typ host");
+        return payload;
     }
 
-    private VideoSignalRequest request(VideoSignalType type, UUID target, JsonNode payload) {
+    private VideoSignalRequest request(VideoSignalType type, UUID target, Object payload) {
         boolean isIce = type == VideoSignalType.ICE_CANDIDATE;
         return new VideoSignalRequest(type, target, isIce ? null : payload, isIce ? payload : null, currentSessionId);
     }
@@ -342,7 +349,7 @@ class VideoSignalServiceTest {
 
     @Test
     void oversizedSdpPayloadIsRejected() {
-        ObjectNode oversized = objectMapper.createObjectNode();
+        Map<String, Object> oversized = new LinkedHashMap<>();
         oversized.put("sdp", "x".repeat(70 * 1024));
 
         assertThatThrownBy(() -> service.relay(boardId, sender, request(VideoSignalType.OFFER, targetUserId, oversized)))
@@ -353,7 +360,7 @@ class VideoSignalServiceTest {
 
     @Test
     void oversizedIceCandidateIsRejected() {
-        ObjectNode oversized = objectMapper.createObjectNode();
+        Map<String, Object> oversized = new LinkedHashMap<>();
         oversized.put("candidate", "x".repeat(9 * 1024));
 
         assertThatThrownBy(() -> service.relay(boardId, sender, request(VideoSignalType.ICE_CANDIDATE, targetUserId, oversized)))
@@ -370,7 +377,7 @@ class VideoSignalServiceTest {
 
     @Test
     void nonObjectPayloadIsRejectedAsMalformed() {
-        JsonNode scalarPayload = objectMapper.valueToTree("just a string, not an object");
+        String scalarPayload = "just a string, not an object";
 
         assertThatThrownBy(() -> service.relay(boardId, sender, request(VideoSignalType.OFFER, targetUserId, scalarPayload)))
                 .isInstanceOf(VideoSignalRejectedException.class)

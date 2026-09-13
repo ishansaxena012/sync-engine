@@ -52,7 +52,7 @@ class VideoSignalSubscriberTest {
     private VideoSignalMessage offerMessage() {
         return new VideoSignalMessage(
                 VideoSignalType.OFFER, UUID.randomUUID(),
-                objectMapper.createObjectNode().put("sdp", "v=0..."), null, System.currentTimeMillis());
+                java.util.Map.of("sdp", "v=0..."), null, System.currentTimeMillis());
     }
 
     private void deliver(VideoSignalEnvelope envelope) throws Exception {

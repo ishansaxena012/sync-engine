@@ -25,7 +25,14 @@ public class WebSocketConfig
     @Override
     public void configureMessageBroker(
             MessageBrokerRegistry registry) {
-        registry.enableSimpleBroker("/topic");
+        // "/queue" is required alongside "/topic": every per-user reply (video
+        // roster/session/errors, presence/cursor "initial" snapshots, undo/redo
+        // and sync replies, chat errors) is sent via convertAndSendToUser, which
+        // Spring's UserDestinationMessageHandler rewrites to a physical
+        // "/queue/..." destination before handing it to this broker. Without
+        // "/queue" registered here, the broker silently drops every one of
+        // those messages — no exception, no log, just no delivery.
+        registry.enableSimpleBroker("/topic", "/queue");
         registry.setApplicationDestinationPrefixes("/app");
     }
 
